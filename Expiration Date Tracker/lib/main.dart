@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const ExpirationDateTrackerApp());
 
@@ -93,32 +95,71 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _index = 0;
-  final List<FoodItem> _items = [
+  bool _loading = true;
+  List<FoodItem> _items = [
     FoodItem('Greek yogurt', 'Dairy', DateTime.now().add(const Duration(days: 2)), Icons.icecream_outlined),
     FoodItem('Baby spinach', 'Produce', DateTime.now().add(const Duration(days: 3)), Icons.eco_outlined),
     FoodItem('Whole milk', 'Dairy', DateTime.now().add(const Duration(days: 6)), Icons.local_drink_outlined),
     FoodItem('Eggs', 'Dairy', DateTime.now().add(const Duration(days: 11)), Icons.egg_alt_outlined),
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _loadItems();
+  }
+
+  Future<void> _loadItems() async {
+    final preferences = await SharedPreferences.getInstance();
+    final saved = preferences.getString('inventory');
+    if (saved != null) {
+      final decoded = (jsonDecode(saved) as List).cast<Map<String, dynamic>>();
+      _items = decoded.map(FoodItem.fromJson).toList();
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _saveItems() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('inventory', jsonEncode(_items.map((item) => item.toJson()).toList()));
+  }
+
   void _addItem() async {
     final item = await showModalBottomSheet<FoodItem>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => AddItemSheet(),
+      builder: (_) => const AddItemSheet(),
     );
-    if (item != null) setState(() => _items.add(item));
+    if (item != null) {
+      setState(() => _items.add(item));
+      _saveItems();
+    }
+  }
+
+  Future<void> _editItem(FoodItem item) async {
+    final updated = await showModalBottomSheet<FoodItem>(context: context, isScrollControlled: true, builder: (_) => AddItemSheet(item: item));
+    if (updated != null) {
+      setState(() => _items[_items.indexWhere((entry) => entry.id == item.id)] = updated);
+      _saveItems();
+    }
+  }
+
+  void _deleteItem(FoodItem item) {
+    setState(() => _items.removeWhere((entry) => entry.id == item.id));
+    _saveItems();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item.name} removed')));
   }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomePage(items: _items, onInventory: () => setState(() => _index = 3)),
+      HomePage(items: _items, onInventory: () => setState(() => _index = 3), onAdd: _addItem),
       NotificationsPage(items: _items),
       CalendarPage(items: _items),
-      InventoryPage(items: _items, onAdd: _addItem),
+      InventoryPage(items: _items, onAdd: _addItem, onEdit: _editItem, onDelete: _deleteItem),
     ];
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: _loading ? const Center(child: CircularProgressIndicator()) : IndexedStack(index: _index, children: pages),
       floatingActionButton: _index == 3 ? FloatingActionButton(onPressed: _addItem, child: const Icon(Icons.add)) : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
@@ -135,9 +176,10 @@ class _AppShellState extends State<AppShell> {
 }
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key, required this.items, required this.onInventory});
+  const HomePage({super.key, required this.items, required this.onInventory, required this.onAdd});
   final List<FoodItem> items;
   final VoidCallback onInventory;
+  final VoidCallback onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -170,7 +212,7 @@ class HomePage extends StatelessWidget {
           const SizedBox(height: 16),
           Text('Quick actions', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          Row(children: [Expanded(child: QuickAction(icon: Icons.add_box_outlined, label: 'Add item', onTap: onInventory)), const SizedBox(width: 12), Expanded(child: QuickAction(icon: Icons.qr_code_scanner, label: 'Scan barcode', onTap: () {}))]),
+          Row(children: [Expanded(child: QuickAction(icon: Icons.add_box_outlined, label: 'Add item', onTap: onAdd)), const SizedBox(width: 12), Expanded(child: QuickAction(icon: Icons.kitchen_outlined, label: 'Inventory', onTap: onInventory))]),
         ],
       ),
     );
@@ -213,32 +255,53 @@ class CalendarPage extends StatelessWidget {
   }
 }
 
-class InventoryPage extends StatelessWidget {
-  const InventoryPage({super.key, required this.items, required this.onAdd});
+class InventoryPage extends StatefulWidget {
+  const InventoryPage({super.key, required this.items, required this.onAdd, required this.onEdit, required this.onDelete});
   final List<FoodItem> items;
   final VoidCallback onAdd;
+  final ValueChanged<FoodItem> onEdit;
+  final ValueChanged<FoodItem> onDelete;
 
   @override
-  Widget build(BuildContext context) => SafeArea(child: ListView(padding: const EdgeInsets.all(20), children: [
-    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('My inventory', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)), IconButton(onPressed: onAdd, icon: const Icon(Icons.add_circle_outline))]),
+  State<InventoryPage> createState() => _InventoryPageState();
+}
+
+class _InventoryPageState extends State<InventoryPage> {
+  String _query = '';
+  String _category = 'All';
+
+  @override
+  Widget build(BuildContext context) {
+    final categories = ['All', ...{for (final item in widget.items) item.category}];
+    final visible = widget.items.where((item) => (_category == 'All' || item.category == _category) && item.name.toLowerCase().contains(_query.toLowerCase())).toList()..sort((a, b) => a.expiry.compareTo(b.expiry));
+    return SafeArea(child: ListView(padding: const EdgeInsets.all(20), children: [
+    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('My inventory', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)), IconButton(onPressed: widget.onAdd, icon: const Icon(Icons.add_circle_outline))]),
     const SizedBox(height: 12),
-    TextField(decoration: InputDecoration(hintText: 'Search items', prefixIcon: const Icon(Icons.search), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none))),
+    TextField(onChanged: (value) => setState(() => _query = value), decoration: InputDecoration(hintText: 'Search items', prefixIcon: const Icon(Icons.search), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none))),
+    const SizedBox(height: 12),
+    SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: categories.map((category) => Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(label: Text(category), selected: _category == category, onSelected: (_) => setState(() => _category = category)))).toList())),
     const SizedBox(height: 18),
-    ...items.map((item) => FoodCard(item: item, showCategory: true)),
+    if (visible.isEmpty) const Padding(padding: EdgeInsets.all(36), child: Center(child: Text('No matching items. Add something to track it.'))),
+    ...visible.map((item) => FoodCard(item: item, showCategory: true, onEdit: () => widget.onEdit(item), onDelete: () => widget.onDelete(item))),
   ]));
+  }
 }
 
 class FoodCard extends StatelessWidget {
-  const FoodCard({super.key, required this.item, this.showCategory = false});
+  const FoodCard({super.key, required this.item, this.showCategory = false, this.onEdit, this.onDelete});
   final FoodItem item;
   final bool showCategory;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
   @override
   Widget build(BuildContext context) => Card(child: ListTile(
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
     leading: CircleAvatar(backgroundColor: const Color(0xFFDDF4EF), child: Icon(item.icon, color: const Color(0xFF08756E))),
     title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w700)),
     subtitle: Text(showCategory ? item.category : 'Expires ${_monthName(item.expiry.month)} ${item.expiry.day}'),
-    trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [Text(item.daysLeft <= 0 ? 'Today' : '${item.daysLeft} days', style: TextStyle(fontWeight: FontWeight.bold, color: item.daysLeft <= 3 ? Colors.red : const Color(0xFF08756E))), if (showCategory) Text('Expires ${item.expiry.month}/${item.expiry.day}', style: const TextStyle(fontSize: 11))]),
+    onTap: onEdit,
+    onLongPress: onDelete,
+    trailing: onEdit == null ? Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [Text(item.daysLeft <= 0 ? 'Today' : '${item.daysLeft} days', style: TextStyle(fontWeight: FontWeight.bold, color: item.daysLeft <= 3 ? Colors.red : const Color(0xFF08756E))), if (showCategory) Text('Expires ${item.expiry.month}/${item.expiry.day}', style: const TextStyle(fontSize: 11))]) : PopupMenuButton<String>(onSelected: (choice) => choice == 'edit' ? onEdit!() : onDelete!(), itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Edit')), PopupMenuItem(value: 'delete', child: Text('Delete'))]),
   ));
 }
 
@@ -250,24 +313,33 @@ class QuickAction extends StatelessWidget {
 }
 
 class AddItemSheet extends StatefulWidget {
-  const AddItemSheet({super.key});
+  const AddItemSheet({super.key, this.item});
+  final FoodItem? item;
 
   @override State<AddItemSheet> createState() => _AddItemSheetState();
 }
 class _AddItemSheetState extends State<AddItemSheet> {
-  final _name = TextEditingController(); DateTime _date = DateTime.now().add(const Duration(days: 7));
+  late final TextEditingController _name;
+  late DateTime _date;
+  late String _category;
+  @override void initState() { super.initState(); _name = TextEditingController(text: widget.item?.name ?? ''); _date = widget.item?.expiry ?? DateTime.now().add(const Duration(days: 7)); _category = widget.item?.category ?? 'Other'; }
   @override void dispose() { _name.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) => Padding(padding: EdgeInsets.fromLTRB(20, 24, 20, 24 + MediaQuery.of(context).viewInsets.bottom), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     Text('Add an item', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)), const SizedBox(height: 16),
-    TextField(controller: _name, autofocus: true, decoration: const InputDecoration(labelText: 'Item name', border: OutlineInputBorder())), const SizedBox(height: 12),
+    TextField(controller: _name, autofocus: true, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Item name', border: OutlineInputBorder())), const SizedBox(height: 12),
+    DropdownButtonFormField<String>(initialValue: _category, decoration: const InputDecoration(labelText: 'Category', border: OutlineInputBorder()), items: const ['Produce', 'Dairy', 'Meat', 'Pantry', 'Frozen', 'Beverages', 'Other'].map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(), onChanged: (value) => setState(() => _category = value!)), const SizedBox(height: 12),
     OutlinedButton.icon(onPressed: () async { final date = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime.now().subtract(const Duration(days: 365)), lastDate: DateTime.now().add(const Duration(days: 3650))); if (date != null) setState(() => _date = date); }, icon: const Icon(Icons.calendar_today), label: Text('Expires ${_monthName(_date.month)} ${_date.day}, ${_date.year}')), const SizedBox(height: 12),
-    FilledButton(onPressed: () { if (_name.text.trim().isNotEmpty) Navigator.pop(context, FoodItem(_name.text.trim(), 'Other', _date, Icons.inventory_2_outlined)); }, child: const Text('Save item')),
+    FilledButton(onPressed: () { if (_name.text.trim().isNotEmpty) Navigator.pop(context, FoodItem(_name.text.trim(), _category, _date, _iconForCategory(_category), id: widget.item?.id)); }, child: Text(widget.item == null ? 'Save item' : 'Save changes')),
   ]));
 }
 
 class FoodItem {
-  FoodItem(this.name, this.category, this.expiry, this.icon);
+  FoodItem(this.name, this.category, this.expiry, this.icon, {String? id}) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString();
+  factory FoodItem.fromJson(Map<String, dynamic> json) => FoodItem(json['name'] as String, json['category'] as String, DateTime.parse(json['expiry'] as String), _iconForCategory(json['category'] as String), id: json['id'] as String);
   final String name, category; final DateTime expiry; final IconData icon;
+  final String id;
   int get daysLeft => DateUtils.dateOnly(expiry).difference(DateUtils.dateOnly(DateTime.now())).inDays;
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'category': category, 'expiry': expiry.toIso8601String()};
 }
 String _monthName(int month) => const ['January','February','March','April','May','June','July','August','September','October','November','December'][month - 1];
+IconData _iconForCategory(String category) => switch (category) { 'Produce' => Icons.eco_outlined, 'Dairy' => Icons.icecream_outlined, 'Meat' => Icons.restaurant_outlined, 'Frozen' => Icons.ac_unit, 'Beverages' => Icons.local_drink_outlined, 'Pantry' => Icons.inventory_2_outlined, _ => Icons.kitchen_outlined };
