@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter_timezone/flutter_timezone.dart';
-import 'package:timezone/data/latest.dart' as tz_data;
-import 'package:timezone/timezone.dart' as tz;
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'models/food_item.dart';
+import 'models/user_profile.dart';
+import 'services/local_store.dart';
+import 'services/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,122 +11,220 @@ Future<void> main() async {
   runApp(const ExpirationDateTrackerApp());
 }
 
-class NotificationService {
-  static final _plugin = FlutterLocalNotificationsPlugin();
-  static const _details = NotificationDetails(android: AndroidNotificationDetails('expiry_reminders', 'Expiry reminders', channelDescription: 'Reminders for items that are about to expire', importance: Importance.high, priority: Priority.high));
-
-  static Future<void> initialize() async {
-    tz_data.initializeTimeZones();
-    final zone = await FlutterTimezone.getLocalTimezone();
-    tz.setLocalLocation(tz.getLocation(zone.identifier));
-    await _plugin.initialize(settings: const InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher')));
-  }
-
-  static Future<void> requestPermission() async {
-    await _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.requestNotificationsPermission();
-  }
-
-  static Future<void> schedule(FoodItem item) async {
-    await cancel(item);
-    for (final days in item.reminderDays) {
-      final date = DateUtils.dateOnly(item.expiry).subtract(Duration(days: days));
-      final when = tz.TZDateTime(tz.local, date.year, date.month, date.day, 9);
-      if (when.isAfter(tz.TZDateTime.now(tz.local))) {
-        await _plugin.zonedSchedule(id: item.notificationId(days), title: 'FreshTrack reminder', body: '${item.name} expires in $days ${days == 1 ? 'day' : 'days'}.', scheduledDate: when, notificationDetails: _details, androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle, payload: item.id);
-      }
-    }
-  }
-
-  static Future<void> cancel(FoodItem item) async {
-    for (final days in [1, 3, 7]) { await _plugin.cancel(id: item.notificationId(days)); }
-  }
-}
-
 class ExpirationDateTrackerApp extends StatelessWidget {
   const ExpirationDateTrackerApp({super.key});
-
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
+  Widget build(BuildContext context) => MaterialApp(
       title: 'FreshTrack',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0B7A75),
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF7FAF9),
-      ),
-      home: const LoginPage(),
-    );
-  }
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF08756E)),
+          scaffoldBackgroundColor: const Color(0xFFF7FAF9),
+          inputDecorationTheme: InputDecorationTheme(
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(14)))),
+      home: const LoginPage());
 }
 
-class LoginPage extends StatelessWidget {
+class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final _email = TextEditingController(), _password = TextEditingController();
+  bool _busy = false;
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _login() async {
+    setState(() => _busy = true);
+    final ok = await LocalStore.authenticate(_email.text, _password.text);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (ok) {
+      Navigator.pushReplacement(
+          context, MaterialPageRoute(builder: (_) => const AppShell()));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Enter the email and password used to create your account.')));
+    }
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(),
-              Container(
-                width: 90,
-                height: 90,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFDDF4EF),
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                child: const Icon(Icons.eco_rounded, color: Color(0xFF08756E), size: 48),
-              ),
-              const SizedBox(height: 28),
-              Text('Welcome to FreshTrack', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
-              Text('Keep your food fresh and stop waste before it happens.', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.black54)),
-              const SizedBox(height: 36),
-              TextField(
-                keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(
-                  labelText: 'Email address',
-                  prefixIcon: const Icon(Icons.mail_outline),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: const Icon(Icons.lock_outline),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-              ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AppShell())),
-                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                child: const Text('Log in'),
-              ),
-              TextButton(onPressed: () {}, child: const Text('Create an account')),
-              const Spacer(),
-            ],
-          ),
-        ),
-      ),
-    );
+  Widget build(BuildContext context) => Scaffold(
+        body: SafeArea(
+            child: LayoutBuilder(
+                builder: (context, constraints) => SingleChildScrollView(
+                      padding: const EdgeInsets.all(28),
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                              minHeight: constraints.maxHeight - 56),
+                          child: IntrinsicHeight(
+                              child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                const Spacer(),
+                                Center(
+                                    child: Container(
+                                        width: 90,
+                                        height: 90,
+                                        decoration: BoxDecoration(
+                                            color: const Color(0xFFDDF4EF),
+                                            borderRadius:
+                                                BorderRadius.circular(28)),
+                                        child: const Icon(Icons.eco_rounded,
+                                            color: Color(0xFF08756E),
+                                            size: 48))),
+                                const SizedBox(height: 28),
+                                Text('Welcome to FreshTrack',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .headlineMedium
+                                        ?.copyWith(
+                                            fontWeight: FontWeight.w800)),
+                                const SizedBox(height: 10),
+                                Text(
+                                    'Keep your food fresh and stop waste before it happens.',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyLarge
+                                        ?.copyWith(color: Colors.black54)),
+                                const SizedBox(height: 32),
+                                TextField(
+                                    controller: _email,
+                                    keyboardType: TextInputType.emailAddress,
+                                    decoration: const InputDecoration(
+                                        labelText: 'Email address',
+                                        prefixIcon: Icon(Icons.mail_outline))),
+                                const SizedBox(height: 14),
+                                TextField(
+                                    controller: _password,
+                                    obscureText: true,
+                                    onSubmitted: (_) => _login(),
+                                    decoration: const InputDecoration(
+                                        labelText: 'Password',
+                                        prefixIcon: Icon(Icons.lock_outline))),
+                                const SizedBox(height: 24),
+                                FilledButton(
+                                    onPressed: _busy ? null : _login,
+                                    style: FilledButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 16)),
+                                    child:
+                                        Text(_busy ? 'Logging in…' : 'Log in')),
+                                TextButton(
+                                    onPressed: () async {
+                                      await Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const CreateAccountPage()));
+                                      if (mounted) setState(() {});
+                                    },
+                                    child: const Text('Create an account')),
+                                const Spacer(),
+                              ]))),
+                    ))),
+      );
+}
+
+class CreateAccountPage extends StatefulWidget {
+  const CreateAccountPage({super.key});
+  @override
+  State<CreateAccountPage> createState() => _CreateAccountPageState();
+}
+
+class _CreateAccountPageState extends State<CreateAccountPage> {
+  final _form = GlobalKey<FormState>(),
+      _name = TextEditingController(),
+      _email = TextEditingController(),
+      _password = TextEditingController();
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
   }
+
+  Future<void> _create() async {
+    if (!_form.currentState!.validate()) return;
+    await LocalStore.register(
+        UserProfile(name: _name.text.trim(), email: _email.text.trim()),
+        _password.text);
+    if (mounted)
+      Navigator.pushAndRemoveUntil(context,
+          MaterialPageRoute(builder: (_) => const AppShell()), (_) => false);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+      appBar: AppBar(title: const Text('Create your account')),
+      body: SafeArea(
+          child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Form(
+                  key: _form,
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('Start wasting less today.',
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 24),
+                        TextFormField(
+                            controller: _name,
+                            decoration: const InputDecoration(
+                                labelText: 'Your name',
+                                prefixIcon: Icon(Icons.person_outline)),
+                            validator: (v) => v == null || v.trim().isEmpty
+                                ? 'Please enter your name'
+                                : null),
+                        const SizedBox(height: 14),
+                        TextFormField(
+                            controller: _email,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(
+                                labelText: 'Email address',
+                                prefixIcon: Icon(Icons.mail_outline)),
+                            validator: (v) => v == null || !v.contains('@')
+                                ? 'Enter a valid email'
+                                : null),
+                        const SizedBox(height: 14),
+                        TextFormField(
+                            controller: _password,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                                labelText: 'Password',
+                                prefixIcon: Icon(Icons.lock_outline)),
+                            validator: (v) => v == null || v.length < 6
+                                ? 'Use at least 6 characters'
+                                : null),
+                        const SizedBox(height: 24),
+                        FilledButton(
+                            onPressed: _create,
+                            style: FilledButton.styleFrom(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16)),
+                            child: const Text('Create account'))
+                      ])))));
 }
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
-
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -135,280 +232,877 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
   bool _loading = true;
-  List<FoodItem> _items = [
-    FoodItem('Greek yogurt', 'Dairy', DateTime.now().add(const Duration(days: 2)), Icons.icecream_outlined),
-    FoodItem('Baby spinach', 'Produce', DateTime.now().add(const Duration(days: 3)), Icons.eco_outlined),
-    FoodItem('Whole milk', 'Dairy', DateTime.now().add(const Duration(days: 6)), Icons.local_drink_outlined),
-    FoodItem('Eggs', 'Dairy', DateTime.now().add(const Duration(days: 11)), Icons.egg_alt_outlined),
-  ];
-
+  UserProfile? _profile;
+  List<FoodItem> _items = [];
   @override
   void initState() {
     super.initState();
-    _loadItems();
+    _load();
   }
 
-  Future<void> _loadItems() async {
-    final preferences = await SharedPreferences.getInstance();
-    final saved = preferences.getString('inventory');
-    if (saved != null) {
-      final decoded = (jsonDecode(saved) as List).cast<Map<String, dynamic>>();
-      _items = decoded.map(FoodItem.fromJson).toList();
+  Future<void> _load() async {
+    _profile = await LocalStore.loadProfile();
+    _items = await LocalStore.loadItems();
+    if (_items.isEmpty) _items = _samples();
+    for (final item in _items) {
+      await NotificationService.schedule(item);
     }
-    for (final item in _items) { await NotificationService.schedule(item); }
     if (mounted) setState(() => _loading = false);
   }
 
-  Future<void> _saveItems() async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString('inventory', jsonEncode(_items.map((item) => item.toJson()).toList()));
-  }
-
-  void _addItem() async {
+  List<FoodItem> _samples() => [
+        FoodItem(
+            name: 'Greek yogurt',
+            category: 'Dairy',
+            expiry: DateTime.now().add(const Duration(days: 2)),
+            location: 'Fridge'),
+        FoodItem(
+            name: 'Baby spinach',
+            category: 'Produce',
+            expiry: DateTime.now().add(const Duration(days: 3)),
+            location: 'Fridge'),
+        FoodItem(
+            name: 'Whole milk',
+            category: 'Dairy',
+            expiry: DateTime.now().add(const Duration(days: 6)),
+            location: 'Fridge'),
+        FoodItem(
+            name: 'Eggs',
+            category: 'Dairy',
+            expiry: DateTime.now().add(const Duration(days: 11)),
+            location: 'Fridge')
+      ];
+  Future<void> _save() => LocalStore.saveItems(_items);
+  Future<void> _add() async {
     final item = await showModalBottomSheet<FoodItem>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => const AddItemSheet(),
-    );
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => const AddItemSheet());
     if (item != null) {
       setState(() => _items.add(item));
-      _saveItems();
-      NotificationService.schedule(item);
+      await _save();
+      await NotificationService.schedule(item);
     }
   }
 
-  Future<void> _editItem(FoodItem item) async {
-    final updated = await showModalBottomSheet<FoodItem>(context: context, isScrollControlled: true, builder: (_) => AddItemSheet(item: item));
+  Future<void> _edit(FoodItem item) async {
+    final updated = await showModalBottomSheet<FoodItem>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => AddItemSheet(item: item));
     if (updated != null) {
-      setState(() => _items[_items.indexWhere((entry) => entry.id == item.id)] = updated);
-      _saveItems();
-      NotificationService.schedule(updated);
+      setState(
+          () => _items[_items.indexWhere((e) => e.id == item.id)] = updated);
+      await _save();
+      await NotificationService.schedule(updated);
     }
   }
 
-  void _deleteItem(FoodItem item) {
-    setState(() => _items.removeWhere((entry) => entry.id == item.id));
-    _saveItems();
-    NotificationService.cancel(item);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item.name} removed')));
+  Future<void> _delete(FoodItem item) async {
+    setState(() => _items.removeWhere((e) => e.id == item.id));
+    await _save();
+    await NotificationService.cancel(item);
   }
 
+  void _quantity(FoodItem item, int diff) {
+    final i = _items.indexWhere((e) => e.id == item.id);
+    setState(() => _items[i] =
+        item.copyWith(quantity: (item.quantity + diff).clamp(0, 999) as int));
+    _save();
+  }
+
+  void _detail(FoodItem item) => Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) =>
+              ItemDetailPage(item: item, onEdit: () => _edit(item))));
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomePage(items: _items, onInventory: () => setState(() => _index = 3), onAdd: _addItem),
-      NotificationsPage(items: _items),
-      CalendarPage(items: _items),
-      InventoryPage(items: _items, onAdd: _addItem, onEdit: _editItem, onDelete: _deleteItem, onQuantity: _changeQuantity),
+      HomePage(
+          name: _profile?.name ?? 'there',
+          items: _items,
+          onInventory: () => setState(() => _index = 3),
+          onAdd: _add,
+          onDetail: _detail,
+          onSettings: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => ProfilePage(
+                      profile: _profile,
+                      onSaved: (p) => setState(() => _profile = p))))),
+      AlertsPage(items: _items, onDetail: _detail),
+      CalendarPage(items: _items, onDetail: _detail),
+      InventoryPage(
+          items: _items,
+          onAdd: _add,
+          onEdit: _edit,
+          onDelete: _delete,
+          onQuantity: _quantity)
     ];
     return Scaffold(
-      body: _loading ? const Center(child: CircularProgressIndicator()) : IndexedStack(index: _index, children: pages),
-      floatingActionButton: _index == 3 ? FloatingActionButton(onPressed: _addItem, child: const Icon(Icons.add)) : null,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (value) => setState(() => _index = value),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.notifications_outlined), selectedIcon: Icon(Icons.notifications), label: 'Alerts'),
-          NavigationDestination(icon: Icon(Icons.calendar_month_outlined), selectedIcon: Icon(Icons.calendar_month), label: 'Calendar'),
-          NavigationDestination(icon: Icon(Icons.kitchen_outlined), selectedIcon: Icon(Icons.kitchen), label: 'Inventory'),
-        ],
-      ),
-    );
-  }
-
-  void _changeQuantity(FoodItem item, int difference) {
-    final index = _items.indexWhere((entry) => entry.id == item.id);
-    final updated = item.copyWith(quantity: (item.quantity + difference).clamp(0, 999));
-    setState(() => _items[index] = updated);
-    _saveItems();
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : IndexedStack(index: _index, children: pages),
+        floatingActionButton: _index == 3
+            ? FloatingActionButton(
+                onPressed: _add, child: const Icon(Icons.add))
+            : null,
+        bottomNavigationBar: NavigationBar(
+            selectedIndex: _index,
+            onDestinationSelected: (i) => setState(() => _index = i),
+            destinations: const [
+              NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home),
+                  label: 'Home'),
+              NavigationDestination(
+                  icon: Icon(Icons.notifications_outlined),
+                  selectedIcon: Icon(Icons.notifications),
+                  label: 'Alerts'),
+              NavigationDestination(
+                  icon: Icon(Icons.calendar_month_outlined),
+                  selectedIcon: Icon(Icons.calendar_month),
+                  label: 'Calendar'),
+              NavigationDestination(
+                  icon: Icon(Icons.kitchen_outlined),
+                  selectedIcon: Icon(Icons.kitchen),
+                  label: 'Inventory')
+            ]));
   }
 }
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key, required this.items, required this.onInventory, required this.onAdd});
+  const HomePage(
+      {super.key,
+      required this.name,
+      required this.items,
+      required this.onInventory,
+      required this.onAdd,
+      required this.onDetail,
+      required this.onSettings});
+  final String name;
   final List<FoodItem> items;
-  final VoidCallback onInventory;
-  final VoidCallback onAdd;
-
+  final VoidCallback onInventory, onAdd, onSettings;
+  final ValueChanged<FoodItem> onDetail;
   @override
   Widget build(BuildContext context) {
-    final urgent = items.where((item) => item.daysLeft <= 3).toList();
+    final urgent = items.where((i) => i.daysLeft <= 3).toList();
     return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-        children: [
+        child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+            children: [
           Row(children: [
-            const CircleAvatar(radius: 24, backgroundColor: Color(0xFFDDF4EF), child: Icon(Icons.person_outline, color: Color(0xFF08756E))),
+            const CircleAvatar(
+                radius: 24,
+                backgroundColor: Color(0xFFDDF4EF),
+                child: Icon(Icons.person_outline, color: Color(0xFF08756E))),
             const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Good morning, Anita', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)), const Text('Let’s keep things fresh.')])) ,
-            IconButton(onPressed: () {}, icon: const Icon(Icons.settings_outlined)),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text('Good morning, $name',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w800)),
+                  const Text('Let’s keep things fresh.')
+                ])),
+            IconButton(
+                onPressed: onSettings,
+                tooltip: 'Profile and settings',
+                icon: const Icon(Icons.settings_outlined))
           ]),
           const SizedBox(height: 24),
           Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: const Color(0xFF08756E), borderRadius: BorderRadius.circular(24)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Your freshness score', style: TextStyle(color: Colors.white70)),
-              const SizedBox(height: 4),
-              const Text('86%', style: TextStyle(color: Colors.white, fontSize: 42, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 10),
-              Text('${urgent.length} items need attention this week', style: const TextStyle(color: Colors.white)),
-            ]),
-          ),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF08756E),
+                  borderRadius: BorderRadius.circular(24)),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Your freshness score',
+                        style: TextStyle(color: Colors.white70)),
+                    const SizedBox(height: 4),
+                    const Text('86%',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 42,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 10),
+                    Text('${urgent.length} items need attention this week',
+                        style: const TextStyle(color: Colors.white))
+                  ])),
           const SizedBox(height: 26),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Expiring soon', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)), TextButton(onPressed: onInventory, child: const Text('View all'))]),
-          ...urgent.map((item) => FoodCard(item: item)),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text('Expiring soon',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            TextButton(onPressed: onInventory, child: const Text('View all'))
+          ]),
+          if (urgent.isEmpty)
+            const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Nothing needs attention right now.')),
+          ...urgent.map((i) => FoodCard(item: i, onTap: () => onDetail(i))),
           const SizedBox(height: 16),
-          Text('Quick actions', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+          Text('Quick actions',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          Row(children: [Expanded(child: QuickAction(icon: Icons.add_box_outlined, label: 'Add item', onTap: onAdd)), const SizedBox(width: 12), Expanded(child: QuickAction(icon: Icons.kitchen_outlined, label: 'Inventory', onTap: onInventory))]),
-        ],
-      ),
-    );
+          Row(children: [
+            Expanded(
+                child: QuickAction(
+                    icon: Icons.add_box_outlined,
+                    label: 'Add item',
+                    onTap: onAdd)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: QuickAction(
+                    icon: Icons.kitchen_outlined,
+                    label: 'Inventory',
+                    onTap: onInventory))
+          ])
+        ]));
   }
 }
 
-class NotificationsPage extends StatelessWidget {
-  const NotificationsPage({super.key, required this.items});
+class AlertsPage extends StatelessWidget {
+  const AlertsPage({super.key, required this.items, required this.onDetail});
   final List<FoodItem> items;
-
+  final ValueChanged<FoodItem> onDetail;
   @override
-  Widget build(BuildContext context) => SafeArea(child: ListView(padding: const EdgeInsets.all(20), children: [
-    Text('Notifications', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-    const SizedBox(height: 6), const Text('Stay ahead of food expiration dates.'), const SizedBox(height: 20),
-    ...items.where((item) => item.daysLeft <= 6).map((item) => Card(child: ListTile(
-      leading: CircleAvatar(backgroundColor: item.daysLeft <= 3 ? const Color(0xFFFFE5E2) : const Color(0xFFFFF2D6), child: Icon(item.daysLeft <= 3 ? Icons.priority_high : Icons.schedule, color: item.daysLeft <= 3 ? Colors.red : Colors.orange)),
-      title: Text('${item.name} expires ${item.daysLeft <= 0 ? 'today' : 'in ${item.daysLeft} days'}'), subtitle: Text('Use it soon or plan it into a meal.'), trailing: const Icon(Icons.chevron_right),
-    ))),
-  ]));
+  Widget build(BuildContext context) {
+    final alerts = items.where((i) => i.daysLeft <= 6).toList();
+    return SafeArea(
+        child: ListView(padding: const EdgeInsets.all(20), children: [
+      Text('Alerts',
+          style: Theme.of(context)
+              .textTheme
+              .headlineSmall
+              ?.copyWith(fontWeight: FontWeight.bold)),
+      const SizedBox(height: 6),
+      const Text('Tap an alert for food guidance and recipe ideas.'),
+      const SizedBox(height: 20),
+      if (alerts.isEmpty)
+        const Padding(
+            padding: EdgeInsets.all(28),
+            child: Center(child: Text('You are all caught up.'))),
+      ...alerts.map((i) => Card(
+          child: ListTile(
+              onTap: () => onDetail(i),
+              leading: CircleAvatar(
+                  backgroundColor: i.daysLeft <= 3
+                      ? const Color(0xFFFFE5E2)
+                      : const Color(0xFFFFF2D6),
+                  child: Icon(
+                      i.daysLeft <= 3 ? Icons.priority_high : Icons.schedule)),
+              title: Text(
+                  '${i.name} expires ${i.daysLeft <= 0 ? 'today' : 'in ${i.daysLeft} days'}'),
+              subtitle: const Text('Use it soon or plan it into a meal.'),
+              trailing: const Icon(Icons.chevron_right))))
+    ]));
+  }
 }
 
 class CalendarPage extends StatelessWidget {
-  const CalendarPage({super.key, required this.items});
+  const CalendarPage({super.key, required this.items, required this.onDetail});
   final List<FoodItem> items;
-
+  final ValueChanged<FoodItem> onDetail;
   @override
   Widget build(BuildContext context) {
     final sorted = [...items]..sort((a, b) => a.expiry.compareTo(b.expiry));
-    return SafeArea(child: ListView(padding: const EdgeInsets.all(20), children: [
-      Text('Calendar', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+    return SafeArea(
+        child: ListView(padding: const EdgeInsets.all(20), children: [
+      Text('Calendar',
+          style: Theme.of(context)
+              .textTheme
+              .headlineSmall
+              ?.copyWith(fontWeight: FontWeight.bold)),
       const SizedBox(height: 18),
-      Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)), child: Column(children: [
-        Text('EXPIRING THIS MONTH', style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 1)), const SizedBox(height: 12),
-        Text('${DateTime.now().month}/${DateTime.now().year}', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 14), const Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [Text('S'), Text('M'), Text('T'), Text('W'), Text('T'), Text('F'), Text('S')]),
-      ])),
-      const SizedBox(height: 24), Text('Upcoming dates', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)), const SizedBox(height: 8),
-      ...sorted.map((item) => ListTile(contentPadding: const EdgeInsets.symmetric(horizontal: 4), leading: Container(width: 44, alignment: Alignment.center, decoration: BoxDecoration(color: const Color(0xFFDDF4EF), borderRadius: BorderRadius.circular(12)), child: Text('${item.expiry.day}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF08756E)))), title: Text(item.name), subtitle: Text('${_monthName(item.expiry.month)} ${item.expiry.day}, ${item.expiry.year}'), trailing: Text('${item.daysLeft}d'))),
+      Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+              color: Colors.white, borderRadius: BorderRadius.circular(20)),
+          child: Column(children: [
+            Text('EXPIRING THIS MONTH',
+                style: Theme.of(context)
+                    .textTheme
+                    .labelLarge
+                    ?.copyWith(letterSpacing: 1)),
+            const SizedBox(height: 12),
+            Text('${monthName(DateTime.now().month)} ${DateTime.now().year}',
+                style: Theme.of(context)
+                    .textTheme
+                    .headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.bold))
+          ])),
+      const SizedBox(height: 24),
+      Text('Upcoming dates',
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.bold)),
+      ...sorted.map((i) => ListTile(
+          onTap: () => onDetail(i),
+          leading: Container(
+              width: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                  color: const Color(0xFFDDF4EF),
+                  borderRadius: BorderRadius.circular(12)),
+              child: Text('${i.expiry.day}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Color(0xFF08756E)))),
+          title: Text(i.name),
+          subtitle: Text(
+              '${monthName(i.expiry.month)} ${i.expiry.day}, ${i.expiry.year}'),
+          trailing: Text('${i.daysLeft}d')))
     ]));
   }
 }
 
 class InventoryPage extends StatefulWidget {
-  const InventoryPage({super.key, required this.items, required this.onAdd, required this.onEdit, required this.onDelete, required this.onQuantity});
+  const InventoryPage(
+      {super.key,
+      required this.items,
+      required this.onAdd,
+      required this.onEdit,
+      required this.onDelete,
+      required this.onQuantity});
   final List<FoodItem> items;
   final VoidCallback onAdd;
-  final ValueChanged<FoodItem> onEdit;
-  final ValueChanged<FoodItem> onDelete;
+  final ValueChanged<FoodItem> onEdit, onDelete;
   final void Function(FoodItem, int) onQuantity;
-
   @override
   State<InventoryPage> createState() => _InventoryPageState();
 }
 
 class _InventoryPageState extends State<InventoryPage> {
-  String _query = '';
-  String _category = 'All';
-  String _location = 'All locations';
-
+  String _query = '', _category = 'All', _location = 'All locations';
   @override
   Widget build(BuildContext context) {
-    final categories = ['All', ...{for (final item in widget.items) item.category}];
-    final locations = ['All locations', ...{for (final item in widget.items) item.location}];
-    final visible = widget.items.where((item) => (_category == 'All' || item.category == _category) && (_location == 'All locations' || item.location == _location) && item.name.toLowerCase().contains(_query.toLowerCase())).toList()..sort((a, b) => a.expiry.compareTo(b.expiry));
-    return SafeArea(child: ListView(padding: const EdgeInsets.all(20), children: [
-    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('My inventory', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)), IconButton(onPressed: widget.onAdd, icon: const Icon(Icons.add_circle_outline))]),
-    const SizedBox(height: 12),
-    TextField(onChanged: (value) => setState(() => _query = value), decoration: InputDecoration(hintText: 'Search items', prefixIcon: const Icon(Icons.search), filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none))),
-    const SizedBox(height: 12),
-    SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: categories.map((category) => Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(label: Text(category), selected: _category == category, onSelected: (_) => setState(() => _category = category)))).toList())),
-    const SizedBox(height: 8),
-    DropdownButtonFormField<String>(initialValue: _location, decoration: const InputDecoration(labelText: 'Storage location', border: OutlineInputBorder()), items: locations.map((location) => DropdownMenuItem(value: location, child: Text(location))).toList(), onChanged: (value) => setState(() => _location = value!)),
-    const SizedBox(height: 18),
-    if (visible.isEmpty) const Padding(padding: EdgeInsets.all(36), child: Center(child: Text('No matching items. Add something to track it.'))),
-    ...visible.map((item) => FoodCard(item: item, showCategory: true, onEdit: () => widget.onEdit(item), onDelete: () => widget.onDelete(item), onDecrease: () => widget.onQuantity(item, -1), onIncrease: () => widget.onQuantity(item, 1))),
-  ]));
+    final categories = [
+      'All',
+      ...{for (final i in widget.items) i.category}
+    ];
+    final locations = [
+      'All locations',
+      ...{for (final i in widget.items) i.location}
+    ];
+    final visible = widget.items
+        .where((i) =>
+            (_category == 'All' || i.category == _category) &&
+            (_location == 'All locations' || i.location == _location) &&
+            i.name.toLowerCase().contains(_query.toLowerCase()))
+        .toList()
+      ..sort((a, b) => a.expiry.compareTo(b.expiry));
+    return SafeArea(
+        child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+            children: [
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text('My inventory',
+                style: Theme.of(context)
+                    .textTheme
+                    .headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            IconButton(
+                onPressed: widget.onAdd,
+                icon: const Icon(Icons.add_circle_outline))
+          ]),
+          const SizedBox(height: 12),
+          TextField(
+              onChanged: (v) => setState(() => _query = v),
+              decoration: const InputDecoration(
+                  hintText: 'Search items',
+                  prefixIcon: Icon(Icons.search),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(borderSide: BorderSide.none))),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                  children: categories
+                      .map((c) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                              label: Text(c),
+                              selected: _category == c,
+                              onSelected: (_) =>
+                                  setState(() => _category = c))))
+                      .toList())),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+              value: _location,
+              decoration: const InputDecoration(labelText: 'Storage location'),
+              items: locations
+                  .map((l) => DropdownMenuItem(value: l, child: Text(l)))
+                  .toList(),
+              onChanged: (v) => setState(() => _location = v!)),
+          const SizedBox(height: 18),
+          if (visible.isEmpty)
+            const Padding(
+                padding: EdgeInsets.all(36),
+                child: Center(
+                    child:
+                        Text('No matching items. Add something to track it.'))),
+          ...visible.map((i) => FoodCard(
+              item: i,
+              showControls: true,
+              onTap: () => widget.onEdit(i),
+              onDelete: () => widget.onDelete(i),
+              onDecrease: () => widget.onQuantity(i, -1),
+              onIncrease: () => widget.onQuantity(i, 1)))
+        ]));
   }
 }
 
 class FoodCard extends StatelessWidget {
-  const FoodCard({super.key, required this.item, this.showCategory = false, this.onEdit, this.onDelete, this.onDecrease, this.onIncrease});
+  const FoodCard(
+      {super.key,
+      required this.item,
+      required this.onTap,
+      this.showControls = false,
+      this.onDelete,
+      this.onDecrease,
+      this.onIncrease});
   final FoodItem item;
-  final bool showCategory;
-  final VoidCallback? onEdit;
-  final VoidCallback? onDelete;
-  final VoidCallback? onDecrease;
-  final VoidCallback? onIncrease;
+  final VoidCallback onTap;
+  final bool showControls;
+  final VoidCallback? onDelete, onDecrease, onIncrease;
   @override
-  Widget build(BuildContext context) => Card(child: ListTile(
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-    leading: CircleAvatar(backgroundColor: const Color(0xFFDDF4EF), child: Icon(item.icon, color: const Color(0xFF08756E))),
-    title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-    subtitle: Text(showCategory ? '${item.category} • ${item.location} • ${item.quantity} ${item.quantity == 1 ? 'item' : 'items'}' : 'Expires ${_monthName(item.expiry.month)} ${item.expiry.day}'),
-    onTap: onEdit,
-    onLongPress: onDelete,
-    trailing: onEdit == null ? Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [Text(item.daysLeft <= 0 ? 'Today' : '${item.daysLeft} days', style: TextStyle(fontWeight: FontWeight.bold, color: item.daysLeft <= 3 ? Colors.red : const Color(0xFF08756E))), if (showCategory) Text('Expires ${item.expiry.month}/${item.expiry.day}', style: const TextStyle(fontSize: 11))]) : Column(mainAxisSize: MainAxisSize.min, children: [Row(mainAxisSize: MainAxisSize.min, children: [IconButton(onPressed: onDecrease, icon: const Icon(Icons.remove_circle_outline), tooltip: 'Use one'), Text('${item.quantity}'), IconButton(onPressed: onIncrease, icon: const Icon(Icons.add_circle_outline), tooltip: 'Add one')]), PopupMenuButton<String>(onSelected: (choice) => choice == 'edit' ? onEdit!() : onDelete!(), itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Edit')), PopupMenuItem(value: 'delete', child: Text('Delete'))])]),
-  ));
+  Widget build(BuildContext context) => Card(
+      child: ListTile(
+          onTap: onTap,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          leading: CircleAvatar(
+              backgroundColor: const Color(0xFFDDF4EF),
+              child: Icon(item.icon, color: const Color(0xFF08756E))),
+          title: Text(item.name,
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text(showControls
+              ? '${item.category} • ${item.location}\n${item.quantityGuidance}'
+              : 'Expires ${monthName(item.expiry.month)} ${item.expiry.day}'),
+          isThreeLine: showControls,
+          trailing: showControls
+              ? Column(mainAxisSize: MainAxisSize.min, children: [
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    IconButton(
+                        onPressed: onDecrease,
+                        icon: const Icon(Icons.remove_circle_outline)),
+                    Text('${item.quantity}'),
+                    IconButton(
+                        onPressed: onIncrease,
+                        icon: const Icon(Icons.add_circle_outline))
+                  ]),
+                  PopupMenuButton<String>(
+                      onSelected: (v) => v == 'delete' ? onDelete!() : onTap(),
+                      itemBuilder: (_) => const [
+                            PopupMenuItem(value: 'edit', child: Text('Edit')),
+                            PopupMenuItem(
+                                value: 'delete', child: Text('Delete'))
+                          ])
+                ])
+              : Text(item.daysLeft <= 0 ? 'Today' : '${item.daysLeft} days',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: item.daysLeft <= 3
+                          ? Colors.red
+                          : const Color(0xFF08756E)))));
 }
 
 class QuickAction extends StatelessWidget {
-  const QuickAction({super.key, required this.icon, required this.label, required this.onTap});
-  final IconData icon; final String label; final VoidCallback onTap;
+  const QuickAction(
+      {super.key,
+      required this.icon,
+      required this.label,
+      required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => InkWell(onTap: onTap, borderRadius: BorderRadius.circular(16), child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)), child: Column(children: [Icon(icon, color: const Color(0xFF08756E)), const SizedBox(height: 8), Text(label)])));
+  Widget build(BuildContext context) => InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+              color: Colors.white, borderRadius: BorderRadius.circular(16)),
+          child: Column(children: [
+            Icon(icon, color: const Color(0xFF08756E)),
+            const SizedBox(height: 8),
+            Text(label)
+          ])));
 }
 
 class AddItemSheet extends StatefulWidget {
   const AddItemSheet({super.key, this.item});
   final FoodItem? item;
-
-  @override State<AddItemSheet> createState() => _AddItemSheetState();
+  @override
+  State<AddItemSheet> createState() => _AddItemSheetState();
 }
+
 class _AddItemSheetState extends State<AddItemSheet> {
   late final TextEditingController _name;
   late DateTime _date;
-  late String _category;
-  late String _location;
+  late String _category, _location;
   late int _quantity;
-  late Set<int> _reminderDays;
-  @override void initState() { super.initState(); _name = TextEditingController(text: widget.item?.name ?? ''); _date = widget.item?.expiry ?? DateTime.now().add(const Duration(days: 7)); _category = widget.item?.category ?? 'Other'; _location = widget.item?.location ?? 'Fridge'; _quantity = widget.item?.quantity ?? 1; _reminderDays = {...?widget.item?.reminderDays}; }
-  @override void dispose() { _name.dispose(); super.dispose(); }
-  @override Widget build(BuildContext context) => Padding(padding: EdgeInsets.fromLTRB(20, 24, 20, 24 + MediaQuery.of(context).viewInsets.bottom), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-    Text('Add an item', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)), const SizedBox(height: 16),
-    TextField(controller: _name, autofocus: true, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Item name', border: OutlineInputBorder())), const SizedBox(height: 12),
-    DropdownButtonFormField<String>(initialValue: _category, decoration: const InputDecoration(labelText: 'Category', border: OutlineInputBorder()), items: const ['Produce', 'Dairy', 'Meat', 'Pantry', 'Frozen', 'Beverages', 'Other'].map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(), onChanged: (value) => setState(() => _category = value!)), const SizedBox(height: 12),
-    DropdownButtonFormField<String>(initialValue: _location, decoration: const InputDecoration(labelText: 'Storage location', border: OutlineInputBorder()), items: const ['Fridge', 'Freezer', 'Pantry', 'Medicine cabinet', 'Counter'].map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(), onChanged: (value) => setState(() => _location = value!)), const SizedBox(height: 12),
-    Row(children: [const Text('Quantity'), const Spacer(), IconButton(onPressed: _quantity > 1 ? () => setState(() => _quantity--) : null, icon: const Icon(Icons.remove_circle_outline)), Text('$_quantity', style: const TextStyle(fontWeight: FontWeight.bold)), IconButton(onPressed: () => setState(() => _quantity++), icon: const Icon(Icons.add_circle_outline))]),
-    OutlinedButton.icon(onPressed: () async { final date = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime.now().subtract(const Duration(days: 365)), lastDate: DateTime.now().add(const Duration(days: 3650))); if (date != null) setState(() => _date = date); }, icon: const Icon(Icons.calendar_today), label: Text('Expires ${_monthName(_date.month)} ${_date.day}, ${_date.year}')), const SizedBox(height: 12),
-    Text('Reminder days', style: Theme.of(context).textTheme.titleSmall), Wrap(spacing: 8, children: [1, 3, 7].map((days) => FilterChip(label: Text('$days day${days == 1 ? '' : 's'} before'), selected: _reminderDays.contains(days), onSelected: (selected) => setState(() => selected ? _reminderDays.add(days) : _reminderDays.remove(days)))).toList()), const SizedBox(height: 6),
-    TextButton.icon(onPressed: NotificationService.requestPermission, icon: const Icon(Icons.notifications_active_outlined), label: const Text('Allow expiry notifications')),
-    FilledButton(onPressed: () { if (_name.text.trim().isNotEmpty) Navigator.pop(context, FoodItem(_name.text.trim(), _category, _date, _iconForCategory(_category), id: widget.item?.id, location: _location, quantity: _quantity, reminderDays: _reminderDays)); }, child: Text(widget.item == null ? 'Save item' : 'Save changes')),
-  ]));
+  late Set<int> _reminders;
+  @override
+  void initState() {
+    super.initState();
+    final i = widget.item;
+    _name = TextEditingController(text: i?.name ?? '');
+    _date = i?.expiry ?? DateTime.now().add(const Duration(days: 7));
+    _category = i?.category ?? 'Other';
+    _location = i?.location ?? 'Fridge';
+    _quantity = i?.quantity ?? 1;
+    _reminders = {...?i?.reminderDays};
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _scan() async {
+    final code = await Navigator.push<String>(
+        context, MaterialPageRoute(builder: (_) => const BarcodeScannerPage()));
+    if (code != null && mounted)
+      setState(() {
+        _name.text = barcodeNames[code] ?? 'Scanned item ($code)';
+        _category = barcodeCategories[code] ?? 'Other';
+      });
+  }
+
+  @override
+  Widget build(BuildContext context) => DraggableScrollableSheet(
+      initialChildSize: .82,
+      minChildSize: .55,
+      maxChildSize: .96,
+      expand: false,
+      builder: (context, controller) => Padding(
+          padding: EdgeInsets.fromLTRB(
+              20, 12, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
+          child: ListView(
+              controller: controller,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              children: [
+                Center(
+                    child: Container(
+                        width: 42,
+                        height: 4,
+                        decoration: BoxDecoration(
+                            color: Colors.black26,
+                            borderRadius: BorderRadius.circular(3)))),
+                const SizedBox(height: 18),
+                Text(widget.item == null ? 'Add an item' : 'Edit item',
+                    style: Theme.of(context)
+                        .textTheme
+                        .headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                    onPressed: _scan,
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Scan barcode')),
+                const SizedBox(height: 12),
+                TextField(
+                    controller: _name,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(labelText: 'Item name')),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                    value: _category,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: const [
+                      'Produce',
+                      'Dairy',
+                      'Meat',
+                      'Pantry',
+                      'Frozen',
+                      'Beverages',
+                      'Other'
+                    ]
+                        .map((v) => DropdownMenuItem(value: v, child: Text(v)))
+                        .toList(),
+                    onChanged: (v) => setState(() => _category = v!)),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                    value: _location,
+                    decoration:
+                        const InputDecoration(labelText: 'Storage location'),
+                    items: const [
+                      'Fridge',
+                      'Freezer',
+                      'Pantry',
+                      'Medicine cabinet',
+                      'Counter'
+                    ]
+                        .map((v) => DropdownMenuItem(value: v, child: Text(v)))
+                        .toList(),
+                    onChanged: (v) => setState(() => _location = v!)),
+                const SizedBox(height: 12),
+                Row(children: [
+                  const Text('Quantity'),
+                  const Spacer(),
+                  IconButton(
+                      onPressed: _quantity > 1
+                          ? () => setState(() => _quantity--)
+                          : null,
+                      icon: const Icon(Icons.remove_circle_outline)),
+                  Text('$_quantity',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  IconButton(
+                      onPressed: () => setState(() => _quantity++),
+                      icon: const Icon(Icons.add_circle_outline))
+                ]),
+                Card(
+                    color: const Color(0xFFE8F5F1),
+                    child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.lightbulb_outline,
+                                  color: Color(0xFF08756E)),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                  child:
+                                      Text(_guidanceFor(_category, _quantity)))
+                            ]))),
+                OutlinedButton.icon(
+                    onPressed: () async {
+                      final date = await showDatePicker(
+                          context: context,
+                          initialDate: _date,
+                          firstDate: DateTime.now()
+                              .subtract(const Duration(days: 365)),
+                          lastDate:
+                              DateTime.now().add(const Duration(days: 3650)));
+                      if (date != null) setState(() => _date = date);
+                    },
+                    icon: const Icon(Icons.calendar_today),
+                    label: Text(
+                        'Expires ${monthName(_date.month)} ${_date.day}, ${_date.year}')),
+                const SizedBox(height: 12),
+                Text('Reminder days',
+                    style: Theme.of(context).textTheme.titleSmall),
+                Wrap(
+                    spacing: 8,
+                    children: [1, 3, 7]
+                        .map((d) => FilterChip(
+                            label: Text('$d day${d == 1 ? '' : 's'} before'),
+                            selected: _reminders.contains(d),
+                            onSelected: (s) => setState(() =>
+                                s ? _reminders.add(d) : _reminders.remove(d))))
+                        .toList()),
+                TextButton.icon(
+                    onPressed: NotificationService.requestPermission,
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('Allow expiry notifications')),
+                FilledButton(
+                    onPressed: () {
+                      if (_name.text.trim().isNotEmpty)
+                        Navigator.pop(
+                            context,
+                            FoodItem(
+                                id: widget.item?.id,
+                                name: _name.text.trim(),
+                                category: _category,
+                                expiry: _date,
+                                location: _location,
+                                quantity: _quantity,
+                                reminderDays: _reminders));
+                    },
+                    child: Text(
+                        widget.item == null ? 'Save item' : 'Save changes'))
+              ])));
 }
 
-class FoodItem {
-  FoodItem(this.name, this.category, this.expiry, this.icon, {String? id, this.location = 'Fridge', this.quantity = 1, Set<int>? reminderDays}) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(), reminderDays = reminderDays ?? {1, 3};
-  factory FoodItem.fromJson(Map<String, dynamic> json) => FoodItem(json['name'] as String, json['category'] as String, DateTime.parse(json['expiry'] as String), _iconForCategory(json['category'] as String), id: json['id'] as String, location: json['location'] as String? ?? 'Fridge', quantity: json['quantity'] as int? ?? 1, reminderDays: ((json['reminderDays'] as List?)?.cast<int>().toSet()) ?? {1, 3});
-  final String name, category; final DateTime expiry; final IconData icon;
-  final String id;
-  final String location;
-  final int quantity;
-  final Set<int> reminderDays;
-  int get daysLeft => DateUtils.dateOnly(expiry).difference(DateUtils.dateOnly(DateTime.now())).inDays;
-  int notificationId(int days) => (id.hashCode & 0x3fffffff) + days;
-  FoodItem copyWith({int? quantity}) => FoodItem(name, category, expiry, icon, id: id, location: location, quantity: quantity ?? this.quantity, reminderDays: reminderDays);
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'category': category, 'expiry': expiry.toIso8601String(), 'location': location, 'quantity': quantity, 'reminderDays': reminderDays.toList()};
+class BarcodeScannerPage extends StatefulWidget {
+  const BarcodeScannerPage({super.key});
+  @override
+  State<BarcodeScannerPage> createState() => _BarcodeScannerPageState();
 }
-String _monthName(int month) => const ['January','February','March','April','May','June','July','August','September','October','November','December'][month - 1];
-IconData _iconForCategory(String category) => switch (category) { 'Produce' => Icons.eco_outlined, 'Dairy' => Icons.icecream_outlined, 'Meat' => Icons.restaurant_outlined, 'Frozen' => Icons.ac_unit, 'Beverages' => Icons.local_drink_outlined, 'Pantry' => Icons.inventory_2_outlined, _ => Icons.kitchen_outlined };
+
+class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
+  bool _done = false;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+      appBar: AppBar(title: const Text('Scan barcode')),
+      body: MobileScanner(onDetect: (capture) {
+        final codes = capture.barcodes;
+        final code = codes.isEmpty ? null : codes.first.rawValue;
+        if (!_done && code != null) {
+          _done = true;
+          Navigator.pop(context, code);
+        }
+      }));
+}
+
+const barcodeNames = {
+  '041383090011': 'Greek yogurt',
+  '041383090028': 'Whole milk'
+};
+const barcodeCategories = {'041383090011': 'Dairy', '041383090028': 'Dairy'};
+String _guidanceFor(String category, int quantity) => switch (category) {
+      'Produce' =>
+        '$quantity ${quantity == 1 ? 'portion is' : 'portions are'} enough for 1–2 meals. Only buy more if you have a plan.',
+      'Dairy' =>
+        'For most households, $quantity item${quantity == 1 ? '' : 's'} is a good 3–5 day supply after opening.',
+      'Meat' =>
+        'Portion $quantity serving${quantity == 1 ? '' : 's'} into meal-sized packs before storing.',
+      _ =>
+        'Track $quantity item${quantity == 1 ? '' : 's'} and restock only when you are down to one.'
+    };
+
+class ItemDetailPage extends StatelessWidget {
+  const ItemDetailPage({super.key, required this.item, required this.onEdit});
+  final FoodItem item;
+  final VoidCallback onEdit;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+      appBar: AppBar(title: Text(item.name), actions: [
+        IconButton(onPressed: onEdit, icon: const Icon(Icons.edit_outlined))
+      ]),
+      body: ListView(padding: const EdgeInsets.all(20), children: [
+        Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+                color: const Color(0xFFE8F5F1),
+                borderRadius: BorderRadius.circular(20)),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                  item.daysLeft <= 0
+                      ? 'Use today'
+                      : '${item.daysLeft} days left',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF08756E))),
+              const SizedBox(height: 8),
+              Text(
+                  'Expires ${monthName(item.expiry.month)} ${item.expiry.day} • ${item.location}')
+            ])),
+        const SizedBox(height: 22),
+        Text('Quantity guidance',
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Text(item.quantityGuidance),
+        const SizedBox(height: 24),
+        Text('Recipe suggestions',
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        const Text('FreshTrack’s AI-style meal ideas based on this item.'),
+        const SizedBox(height: 10),
+        ..._recipesFor(item).map((r) => Card(
+            child: ListTile(
+                leading: const CircleAvatar(child: Icon(Icons.auto_awesome)),
+                title: Text(r.$1),
+                subtitle: Text(r.$2),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('${r.$1} added to your meal ideas'))))))
+      ]));
+}
+
+List<(String, String)> _recipesFor(FoodItem item) => switch (item.category) {
+      'Produce' => [
+          (
+            'Quick sauté',
+            'Pair ${item.name} with garlic, olive oil, and grains.'
+          ),
+          ('Fresh salad', 'Toss ${item.name} into a bright, low-waste lunch.')
+        ],
+      'Dairy' => [
+          ('Creamy pasta', 'Use ${item.name} in a quick sauce or topping.'),
+          ('Breakfast bowl', 'Make a simple breakfast using ${item.name}.')
+        ],
+      _ => [
+          (
+            'Use-it-up bowl',
+            'Build a flexible meal around ${item.name} and pantry staples.'
+          ),
+          ('Weekend prep', 'Turn ${item.name} into portions for the week.')
+        ]
+    };
+
+class ProfilePage extends StatefulWidget {
+  const ProfilePage({super.key, required this.profile, required this.onSaved});
+  final UserProfile? profile;
+  final ValueChanged<UserProfile> onSaved;
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  late final TextEditingController _name;
+  late final TextEditingController _email;
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.profile?.name ?? '');
+    _email = TextEditingController(text: widget.profile?.email ?? '');
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+      appBar: AppBar(title: const Text('Profile & settings')),
+      body: ListView(padding: const EdgeInsets.all(20), children: [
+        const CircleAvatar(radius: 38, child: Icon(Icons.person, size: 40)),
+        const SizedBox(height: 22),
+        TextField(
+            controller: _name,
+            decoration: const InputDecoration(labelText: 'Name')),
+        const SizedBox(height: 14),
+        TextField(
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(labelText: 'Email')),
+        const SizedBox(height: 24),
+        FilledButton(
+            onPressed: () async {
+              final p = UserProfile(
+                  name: _name.text.trim(), email: _email.text.trim());
+              await LocalStore.updateProfile(p);
+              widget.onSaved(p);
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text('Save profile')),
+        const SizedBox(height: 16),
+        ListTile(
+            leading: const Icon(Icons.notifications_active_outlined),
+            title: const Text('Expiry notifications'),
+            subtitle:
+                const Text('Enable reminders for items before they expire'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: NotificationService.requestPermission)
+      ]));
+}
