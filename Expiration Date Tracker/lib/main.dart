@@ -1,12 +1,18 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'models/food_item.dart';
 import 'models/user_profile.dart';
 import 'services/local_store.dart';
 import 'services/notification_service.dart';
+import 'services/storage_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   await NotificationService.initialize();
   runApp(const ExpirationDateTrackerApp());
 }
@@ -24,7 +30,22 @@ class ExpirationDateTrackerApp extends StatelessWidget {
           inputDecorationTheme: InputDecorationTheme(
               border:
                   OutlineInputBorder(borderRadius: BorderRadius.circular(14)))),
-      home: const LoginPage());
+      home: const AuthenticationGate());
+}
+
+class AuthenticationGate extends StatelessWidget {
+  const AuthenticationGate({super.key});
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
+        }
+        return snapshot.hasData ? const AppShell() : const LoginPage();
+      });
 }
 
 class LoginPage extends StatefulWidget {
@@ -160,12 +181,17 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
   Future<void> _create() async {
     if (!_form.currentState!.validate()) return;
-    await LocalStore.register(
-        UserProfile(name: _name.text.trim(), email: _email.text.trim()),
-        _password.text);
-    if (mounted)
-      Navigator.pushAndRemoveUntil(context,
-          MaterialPageRoute(builder: (_) => const AppShell()), (_) => false);
+    try {
+      await LocalStore.register(
+          UserProfile(name: _name.text.trim(), email: _email.text.trim()),
+          _password.text);
+      if (mounted) Navigator.pop(context);
+    } on FirebaseAuthException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(error.message ?? 'Unable to create account.')));
+      }
+    }
   }
 
   @override
@@ -273,6 +299,14 @@ class _AppShellState extends State<AppShell> {
             location: 'Fridge')
       ];
   Future<void> _save() => LocalStore.saveItems(_items);
+  Future<FoodItem> _uploadPendingPhoto(FoodItem item) async {
+    final path = item.localImagePath;
+    if (path == null) return item;
+    final url = await StorageService.uploadItemPhoto(
+        itemId: item.id, image: File(path));
+    return item.copyWith(photoUrl: url, localImagePath: '');
+  }
+
   Future<void> _add() async {
     final item = await showModalBottomSheet<FoodItem>(
         context: context,
@@ -280,9 +314,10 @@ class _AppShellState extends State<AppShell> {
         useSafeArea: true,
         builder: (_) => const AddItemSheet());
     if (item != null) {
-      setState(() => _items.add(item));
+      final saved = await _uploadPendingPhoto(item);
+      setState(() => _items.add(saved));
       await _save();
-      await NotificationService.schedule(item);
+      await NotificationService.schedule(saved);
     }
   }
 
@@ -293,23 +328,24 @@ class _AppShellState extends State<AppShell> {
         useSafeArea: true,
         builder: (_) => AddItemSheet(item: item));
     if (updated != null) {
-      setState(
-          () => _items[_items.indexWhere((e) => e.id == item.id)] = updated);
+      final saved = await _uploadPendingPhoto(updated);
+      setState(() => _items[_items.indexWhere((e) => e.id == item.id)] = saved);
       await _save();
-      await NotificationService.schedule(updated);
+      await NotificationService.schedule(saved);
     }
   }
 
   Future<void> _delete(FoodItem item) async {
     setState(() => _items.removeWhere((e) => e.id == item.id));
     await _save();
+    await StorageService.deleteItemPhoto(item.id);
     await NotificationService.cancel(item);
   }
 
   void _quantity(FoodItem item, int diff) {
     final i = _items.indexWhere((e) => e.id == item.id);
     setState(() => _items[i] =
-        item.copyWith(quantity: (item.quantity + diff).clamp(0, 999) as int));
+        item.copyWith(quantity: (item.quantity + diff).clamp(0, 999)));
     _save();
   }
 
@@ -643,7 +679,7 @@ class _InventoryPageState extends State<InventoryPage> {
                       .toList())),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
-              value: _location,
+              initialValue: _location,
               decoration: const InputDecoration(labelText: 'Storage location'),
               items: locations
                   .map((l) => DropdownMenuItem(value: l, child: Text(l)))
@@ -688,7 +724,11 @@ class FoodCard extends StatelessWidget {
               const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           leading: CircleAvatar(
               backgroundColor: const Color(0xFFDDF4EF),
-              child: Icon(item.icon, color: const Color(0xFF08756E))),
+              backgroundImage:
+                  item.photoUrl == null ? null : NetworkImage(item.photoUrl!),
+              child: item.photoUrl == null
+                  ? Icon(item.icon, color: const Color(0xFF08756E))
+                  : null),
           title: Text(item.name,
               style: const TextStyle(fontWeight: FontWeight.w700)),
           subtitle: Text(showControls
@@ -759,6 +799,7 @@ class _AddItemSheetState extends State<AddItemSheet> {
   late String _category, _location;
   late int _quantity;
   late Set<int> _reminders;
+  XFile? _photo;
   @override
   void initState() {
     super.initState();
@@ -780,11 +821,18 @@ class _AddItemSheetState extends State<AddItemSheet> {
   Future<void> _scan() async {
     final code = await Navigator.push<String>(
         context, MaterialPageRoute(builder: (_) => const BarcodeScannerPage()));
-    if (code != null && mounted)
+    if (code != null && mounted) {
       setState(() {
         _name.text = barcodeNames[code] ?? 'Scanned item ($code)';
         _category = barcodeCategories[code] ?? 'Other';
       });
+    }
+  }
+
+  Future<void> _pickPhoto() async {
+    final photo = await ImagePicker().pickImage(
+        source: ImageSource.gallery, imageQuality: 82, maxWidth: 1600);
+    if (photo != null && mounted) setState(() => _photo = photo);
   }
 
   @override
@@ -819,13 +867,29 @@ class _AddItemSheetState extends State<AddItemSheet> {
                     icon: const Icon(Icons.qr_code_scanner),
                     label: const Text('Scan barcode')),
                 const SizedBox(height: 12),
+                OutlinedButton.icon(
+                    onPressed: _pickPhoto,
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    label: Text(_photo == null
+                        ? 'Add item photo'
+                        : 'Change item photo')),
+                if (_photo != null) ...[
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.file(File(_photo!.path),
+                          height: 120,
+                          width: double.infinity,
+                          fit: BoxFit.cover))
+                ],
+                const SizedBox(height: 12),
                 TextField(
                     controller: _name,
                     textCapitalization: TextCapitalization.words,
                     decoration: const InputDecoration(labelText: 'Item name')),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                    value: _category,
+                    initialValue: _category,
                     decoration: const InputDecoration(labelText: 'Category'),
                     items: const [
                       'Produce',
@@ -841,7 +905,7 @@ class _AddItemSheetState extends State<AddItemSheet> {
                     onChanged: (v) => setState(() => _category = v!)),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                    value: _location,
+                    initialValue: _location,
                     decoration:
                         const InputDecoration(labelText: 'Storage location'),
                     items: const [
@@ -915,7 +979,7 @@ class _AddItemSheetState extends State<AddItemSheet> {
                     label: const Text('Allow expiry notifications')),
                 FilledButton(
                     onPressed: () {
-                      if (_name.text.trim().isNotEmpty)
+                      if (_name.text.trim().isNotEmpty) {
                         Navigator.pop(
                             context,
                             FoodItem(
@@ -925,7 +989,10 @@ class _AddItemSheetState extends State<AddItemSheet> {
                                 expiry: _date,
                                 location: _location,
                                 quantity: _quantity,
-                                reminderDays: _reminders));
+                                reminderDays: _reminders,
+                                photoUrl: widget.item?.photoUrl,
+                                localImagePath: _photo?.path));
+                      }
                     },
                     child: Text(
                         widget.item == null ? 'Save item' : 'Save changes'))
@@ -1103,6 +1170,14 @@ class _ProfilePageState extends State<ProfilePage> {
             subtitle:
                 const Text('Enable reminders for items before they expire'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: NotificationService.requestPermission)
+            onTap: NotificationService.requestPermission),
+        const Divider(),
+        ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('Log out'),
+            onTap: () async {
+              await LocalStore.signOut();
+              if (mounted) Navigator.pop(context);
+            })
       ]));
 }

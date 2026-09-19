@@ -8,6 +8,8 @@ class FoodItem {
     required this.location,
     this.quantity = 1,
     Set<int>? reminderDays,
+    this.photoUrl,
+    this.localImagePath,
     String? id,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
         reminderDays = reminderDays ?? {1, 3};
@@ -21,6 +23,7 @@ class FoodItem {
         quantity: json['quantity'] as int? ?? 1,
         reminderDays:
             ((json['reminderDays'] as List?)?.cast<int>().toSet()) ?? {1, 3},
+        photoUrl: json['photoUrl'] as String?,
       );
 
   final String id;
@@ -30,6 +33,10 @@ class FoodItem {
   final String location;
   final int quantity;
   final Set<int> reminderDays;
+  final String? photoUrl;
+
+  /// Used only while an image is waiting to upload to Firebase Storage.
+  final String? localImagePath;
 
   int get daysLeft => DateUtils.dateOnly(expiry)
       .difference(DateUtils.dateOnly(DateTime.now()))
@@ -53,7 +60,9 @@ class FoodItem {
           String? category,
           DateTime? expiry,
           String? location,
-          Set<int>? reminderDays}) =>
+          Set<int>? reminderDays,
+          String? photoUrl,
+          String? localImagePath}) =>
       FoodItem(
         id: id,
         name: name ?? this.name,
@@ -62,6 +71,8 @@ class FoodItem {
         location: location ?? this.location,
         quantity: quantity ?? this.quantity,
         reminderDays: reminderDays ?? this.reminderDays,
+        photoUrl: photoUrl ?? this.photoUrl,
+        localImagePath: localImagePath ?? this.localImagePath,
       );
 
   Map<String, dynamic> toJson() => {
@@ -72,6 +83,7 @@ class FoodItem {
         'location': location,
         'quantity': quantity,
         'reminderDays': reminderDays.toList(),
+        'photoUrl': photoUrl,
       };
 }
 

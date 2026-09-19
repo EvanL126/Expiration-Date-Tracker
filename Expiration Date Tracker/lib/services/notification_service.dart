@@ -32,7 +32,7 @@ class NotificationService {
       final date =
           DateUtils.dateOnly(item.expiry).subtract(Duration(days: days));
       final when = tz.TZDateTime(tz.local, date.year, date.month, date.day, 9);
-      if (when.isAfter(tz.TZDateTime.now(tz.local)))
+      if (when.isAfter(tz.TZDateTime.now(tz.local))) {
         await _plugin.zonedSchedule(
             id: item.notificationId(days),
             title: 'FreshTrack reminder',
@@ -42,6 +42,7 @@ class NotificationService {
             notificationDetails: _details,
             androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
             payload: item.id);
+      }
     }
   }
 

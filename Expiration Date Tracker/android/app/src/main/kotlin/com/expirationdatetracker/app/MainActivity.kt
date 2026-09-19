@@ -1,4 +1,4 @@
-package com.example.expiration_date_tracker
+package com.expirationdatetracker.app
 
 import io.flutter.embedding.android.FlutterActivity
 

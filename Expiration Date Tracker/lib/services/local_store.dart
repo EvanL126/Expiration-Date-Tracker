@@ -1,49 +1,72 @@
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../models/food_item.dart';
 import '../models/user_profile.dart';
 
 class LocalStore {
-  static const _inventoryKey = 'inventory';
-  static const _profileKey = 'profile';
-  static const _passwordKey = 'password';
+  static final _auth = FirebaseAuth.instance;
+  static final _firestore = FirebaseFirestore.instance;
+  static User get _user => _auth.currentUser!;
+  static DocumentReference<Map<String, dynamic>> get _profile =>
+      _firestore.collection('users').doc(_user.uid);
+  static CollectionReference<Map<String, dynamic>> get _inventory =>
+      _profile.collection('items');
 
   static Future<List<FoodItem>> loadItems() async {
-    final value =
-        (await SharedPreferences.getInstance()).getString(_inventoryKey);
-    if (value == null) return [];
-    return (jsonDecode(value) as List)
-        .cast<Map<String, dynamic>>()
-        .map(FoodItem.fromJson)
+    final snapshot = await _inventory.orderBy('expiry').get();
+    return snapshot.docs
+        .map((document) => FoodItem.fromJson(document.data()))
         .toList();
   }
 
-  static Future<void> saveItems(List<FoodItem> items) async =>
-      (await SharedPreferences.getInstance()).setString(_inventoryKey,
-          jsonEncode(items.map((item) => item.toJson()).toList()));
+  static Future<void> saveItems(List<FoodItem> items) async {
+    final existing = await _inventory.get();
+    final ids = items.map((item) => item.id).toSet();
+    final batch = _firestore.batch();
+    for (final item in items) {
+      batch.set(_inventory.doc(item.id), item.toJson());
+    }
+    for (final document
+        in existing.docs.where((doc) => !ids.contains(doc.id))) {
+      batch.delete(document.reference);
+    }
+    await batch.commit();
+  }
+
   static Future<UserProfile?> loadProfile() async {
-    final value =
-        (await SharedPreferences.getInstance()).getString(_profileKey);
-    return value == null
-        ? null
-        : UserProfile.fromJson(jsonDecode(value) as Map<String, dynamic>);
+    if (_auth.currentUser == null) return null;
+    final snapshot = await _profile.get();
+    return snapshot.exists ? UserProfile.fromJson(snapshot.data()!) : null;
   }
 
   static Future<void> register(UserProfile profile, String password) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_profileKey, jsonEncode(profile.toJson()));
-    await prefs.setString(_passwordKey, password);
+    final credential = await _auth.createUserWithEmailAndPassword(
+        email: profile.email.trim(), password: password);
+    await credential.user!.updateDisplayName(profile.name);
+    await _firestore.collection('users').doc(credential.user!.uid).set({
+      ...profile.toJson(),
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   static Future<bool> authenticate(String email, String password) async {
-    final prefs = await SharedPreferences.getInstance();
-    final profile = await loadProfile();
-    return profile != null &&
-        profile.email.toLowerCase() == email.trim().toLowerCase() &&
-        prefs.getString(_passwordKey) == password;
+    try {
+      await _auth.signInWithEmailAndPassword(
+          email: email.trim(), password: password);
+      return true;
+    } on FirebaseAuthException {
+      return false;
+    }
   }
 
-  static Future<void> updateProfile(UserProfile profile) async =>
-      (await SharedPreferences.getInstance())
-          .setString(_profileKey, jsonEncode(profile.toJson()));
+  static Future<void> updateProfile(UserProfile profile) async {
+    await _user.updateDisplayName(profile.name);
+    await _profile.set({
+      ...profile.toJson(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  static Future<void> signOut() => _auth.signOut();
 }
