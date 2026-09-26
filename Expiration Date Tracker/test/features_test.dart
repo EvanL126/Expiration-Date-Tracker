@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:expiration_date_tracker/main.dart';
+import 'package:expiration_date_tracker/screens/home_page.dart';
+import 'package:expiration_date_tracker/screens/inventory_page.dart';
+import 'package:expiration_date_tracker/screens/calendar_page.dart';
 import 'package:expiration_date_tracker/models/food_item.dart';
-import 'package:expiration_date_tracker/recipes_page.dart';
+import 'package:expiration_date_tracker/screens/recipes_page.dart';
 
 FoodItem food(String name, String category, int days) => FoodItem(
     name: name,

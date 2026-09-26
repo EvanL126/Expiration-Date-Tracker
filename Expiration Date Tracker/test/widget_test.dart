@@ -2,7 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:expiration_date_tracker/main.dart';
+import 'package:expiration_date_tracker/screens/login_page.dart';
+import 'package:expiration_date_tracker/screens/create_account_page.dart';
 
 Future<void> submit(WidgetTester tester, String confirmation) async {
   final fields = find.byType(TextFormField);
