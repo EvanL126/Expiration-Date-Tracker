@@ -42,12 +42,18 @@ class LocalStore {
   static Future<void> register(UserProfile profile, String password) async {
     final credential = await _auth.createUserWithEmailAndPassword(
         email: profile.email.trim(), password: password);
-    await credential.user!.updateDisplayName(profile.name);
-    await _firestore.collection('users').doc(credential.user!.uid).set({
-      ...profile.toJson(),
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      await credential.user!.updateDisplayName(profile.name);
+      await _firestore.collection('users').doc(credential.user!.uid).set({
+        ...profile.toJson(),
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Authentication has already succeeded; retrying sign-up would create
+      // an email-already-in-use error instead of completing profile setup.
+      throw FirebaseAuthException(code: 'profile-setup-failed');
+    }
   }
 
   static Future<bool> authenticate(String email, String password) async {

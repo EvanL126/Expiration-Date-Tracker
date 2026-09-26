@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "459717286234",
+    "project_id": "expiration-date-tracker-574f3",
+    "storage_bucket": "expiration-date-tracker-574f3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:459717286234:android:9b2684394b03a2603abb63",
+        "android_client_info": {
+          "package_name": "com.expirationdatetracker.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBuZ_7TPOfhBgcKPjFBRtD8VuzrLbl2M94"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

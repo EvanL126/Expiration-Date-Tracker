@@ -28,6 +28,7 @@ class NotificationService {
       ?.requestNotificationsPermission();
   static Future<void> schedule(FoodItem item) async {
     await cancel(item);
+    if (item.quantity <= 0) return;
     for (final days in item.reminderDays) {
       final date =
           DateUtils.dateOnly(item.expiry).subtract(Duration(days: days));

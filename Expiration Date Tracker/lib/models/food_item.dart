@@ -38,9 +38,15 @@ class FoodItem {
   /// Used only while an image is waiting to upload to Firebase Storage.
   final String? localImagePath;
 
-  int get daysLeft => DateUtils.dateOnly(expiry)
-      .difference(DateUtils.dateOnly(DateTime.now()))
+  int get daysLeft => DateTime.utc(expiry.year, expiry.month, expiry.day)
+      .difference(DateTime.utc(
+          DateTime.now().year, DateTime.now().month, DateTime.now().day))
       .inDays;
+  String get expiryLabel => daysLeft < 0
+      ? 'Expired ${-daysLeft} day${daysLeft == -1 ? '' : 's'} ago'
+      : daysLeft == 0
+          ? 'Expires today'
+          : 'Expires in $daysLeft days';
   int notificationId(int days) => (id.hashCode & 0x3fffffff) + days;
   IconData get icon => iconForCategory(category);
   String get quantityGuidance => switch (category) {
