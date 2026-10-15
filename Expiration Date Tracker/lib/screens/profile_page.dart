@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/user_profile.dart';
 import '../services/local_store.dart';
 import '../services/notification_service.dart';
+import 'delete_account_page.dart';
+import 'tutorial_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key, required this.profile, required this.onSaved});
@@ -46,10 +48,12 @@ class _ProfilePageState extends State<ProfilePage> {
         FilledButton(
             onPressed: () async {
               final p = UserProfile(
-                  name: _name.text.trim(), email: _email.text.trim());
+                  name: _name.text.trim(),
+                  email: _email.text.trim(),
+                  tutorialCompleted: widget.profile?.tutorialCompleted ?? true);
               await LocalStore.updateProfile(p);
               widget.onSaved(p);
-              if (mounted) Navigator.pop(context);
+              if (context.mounted) Navigator.pop(context);
             },
             child: const Text('Save profile')),
         const SizedBox(height: 16),
@@ -62,11 +66,29 @@ class _ProfilePageState extends State<ProfilePage> {
             onTap: NotificationService.requestPermission),
         const Divider(),
         ListTile(
+            leading: const Icon(Icons.help_outline),
+            title: const Text('App tutorial'),
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                    builder: (tutorialContext) =>
+                        TutorialPage(onComplete: () async {
+                          Navigator.pop(tutorialContext);
+                        })))),
+        ListTile(
+            leading: Icon(Icons.delete_forever,
+                color: Theme.of(context).colorScheme.error),
+            title: const Text('Delete account'),
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                    builder: (_) => const DeleteAccountPage()))),
+        ListTile(
             leading: const Icon(Icons.logout),
             title: const Text('Log out'),
             onTap: () async {
               await LocalStore.signOut();
-              if (mounted) Navigator.pop(context);
+              if (context.mounted) Navigator.pop(context);
             })
       ]));
 }

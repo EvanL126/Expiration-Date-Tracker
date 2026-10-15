@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../services/local_store.dart';
-import 'app_shell.dart';
 import 'create_account_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -24,10 +23,7 @@ class _LoginPageState extends State<LoginPage> {
     final ok = await LocalStore.authenticate(_email.text, _password.text);
     if (!mounted) return;
     setState(() => _busy = false);
-    if (ok) {
-      Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => const AppShell()));
-    } else {
+    if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text(
               'Enter the email and password used to create your account.')));

@@ -1,0 +1,16 @@
+/* Prices/totals are cents. Sugar rates are millionths of a dollar per US fluid ounce. */
+(function(root){
+'use strict';
+const cents=value=>{const n=Number(value);if(String(value).trim()===''||!Number.isFinite(n)||n<0||n>10000000)throw Error('Enter a valid amount from $0 to $10,000,000.');return Math.round(n*100);};
+const norm=s=>String(s).trim().toLocaleLowerCase();
+function lookup(products,query){const q=norm(query);if(!q)return {exact:[],matches:[]};const barcode=products.filter(p=>p.barcode&&norm(p.barcode)===q);const exact=barcode.length?barcode:products.filter(p=>norm(p.name)===q);return {exact,matches:products.filter(p=>norm(p.name).includes(q)||(p.barcode&&norm(p.barcode).includes(q)))};}
+function ounces(volume){const s=String(volume||'');let m=s.match(/([\d.]+)\s*(?:fl\.?\s*)?oz\b/i);if(m)return Number(m[1]);m=s.match(/([\d.]+)\s*ml\b/i);if(m)return Number(m[1])/29.5735295625;m=s.match(/([\d.]+)\s*(?:l|liters?|litres?)\b/i);return m?Number(m[1])*33.8140227018:0;}
+function rate(value){const n=Number(value);if(String(value).trim()===''||!Number.isFinite(n)||n<0||n>100)throw Error('Enter a sugar tax rate from $0 to $100 per ounce.');return Math.round(n*1000000);}
+function salesRate(value){const n=Number(value);if(!Number.isFinite(n)||n<0||n>100)throw Error('Sales tax must be from 0% to 100%.');return Math.round(n*100);}
+function lineSugar(l){return l.sugarRateMicros!=null?Math.round(l.sugarRateMicros*l.ounces*l.pack*l.qty/10000):l.sugarTax*l.qty;}
+function lineSales(l){return Math.round(l.price*l.qty*(l.salesTaxBps||0)/10000);}
+function totals(invoice){let subtotal=0,tax=0,salesTax=0,packs=0,units=0;for(const l of invoice.lines){subtotal+=l.price*l.qty;tax+=lineSugar(l);salesTax+=lineSales(l);packs+=l.qty;units+=l.pack*l.qty;}const paid=invoice.payments.reduce((sum,p)=>sum+p.amount,0),total=subtotal+tax+salesTax;return {subtotal,tax,salesTax,packs,units,paid,total,balance:Math.max(0,total-paid),credit:Math.max(0,paid-total)};}
+function makeLine(p){return {productId:p.id,name:p.name,barcode:p.barcode,pack:p.pack,volume:p.volume,category:p.category,price:p.price,sugarTax:p.soda?p.sugarTax:0,sugarRateMicros:p.soda?(p.sugarRateMicros??null):0,ounces:p.ounces||0,salesTaxBps:p.salesTaxBps||0,qty:1};}
+function validateProduct(p,products){if(!p.name.trim())throw Error('Product name is required.');if(!Number.isInteger(p.pack)||p.pack<1)throw Error('Pack size must be a positive whole number.');if(!Number.isInteger(p.price)||p.price<0||!Number.isInteger(p.sugarTax)||p.sugarTax<0)throw Error('Invalid price or sugar tax.');if(p.sugarRateMicros!=null&&(!Number.isInteger(p.sugarRateMicros)||p.sugarRateMicros<0))throw Error('Invalid sugar rate.');if(p.soda&&p.sugarRateMicros>0&&(!Number.isFinite(p.ounces)||p.ounces<=0))throw Error('Enter the fluid ounces per unit for sugar tax.');if(p.salesTaxBps!=null&&(!Number.isInteger(p.salesTaxBps)||p.salesTaxBps<0||p.salesTaxBps>10000))throw Error('Invalid sales tax rate.');if(p.barcode&&products.some(x=>x.id!==p.id&&norm(x.barcode)===norm(p.barcode)))throw Error('This barcode is already assigned to another product.');}
+const api={cents,norm,lookup,totals,makeLine,validateProduct,ounces,rate,salesRate,lineSugar,lineSales};root.POSCore=api;if(typeof module!=='undefined')module.exports=api;
+})(typeof globalThis!=='undefined'?globalThis:this);

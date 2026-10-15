@@ -13,6 +13,7 @@ import 'inventory_page.dart';
 import 'recipes_page.dart';
 import 'item_detail_page.dart';
 import 'profile_page.dart';
+import 'tutorial_page.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -24,6 +25,7 @@ class _AppShellState extends State<AppShell> {
   int _index = 0;
   bool _loading = true;
   String? _loadError;
+  bool _showTutorial = false;
   UserProfile? _profile;
   List<FoodItem> _items = [];
   @override
@@ -39,6 +41,15 @@ class _AppShellState extends State<AppShell> {
     });
     try {
       _profile = await LocalStore.loadProfile();
+      _showTutorial = !((_profile?.tutorialCompleted ?? true) ||
+          await LocalStore.hasCompletedTutorial());
+      if (!_showTutorial && _profile != null) {
+        _profile = UserProfile(
+          name: _profile!.name,
+          email: _profile!.email,
+          tutorialCompleted: true,
+        );
+      }
       _items = await LocalStore.loadItems();
     } catch (_) {
       _loadError =
@@ -120,6 +131,27 @@ class _AppShellState extends State<AppShell> {
               ItemDetailPage(item: item, onEdit: () => _edit(item))));
   @override
   Widget build(BuildContext context) {
+    if (!_loading && _loadError == null && _showTutorial) {
+      return TutorialPage(onComplete: () async {
+        if (mounted) {
+          setState(() {
+            _showTutorial = false;
+            if (_profile != null) {
+              _profile = UserProfile(
+                name: _profile!.name,
+                email: _profile!.email,
+                tutorialCompleted: true,
+              );
+            }
+          });
+        }
+        try {
+          await LocalStore.completeTutorial();
+        } catch (_) {
+          // Saving progress must never prevent entry into the app.
+        }
+      });
+    }
     final pages = [
       HomePage(
           name: _profile?.name ?? 'there',

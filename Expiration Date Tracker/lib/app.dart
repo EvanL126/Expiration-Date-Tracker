@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/authentication_gate.dart';
+import 'startup_gate.dart';
 
 class ExpirationDateTrackerApp extends StatelessWidget {
   const ExpirationDateTrackerApp({super.key});
@@ -14,5 +15,5 @@ class ExpirationDateTrackerApp extends StatelessWidget {
           inputDecorationTheme: InputDecorationTheme(
               border:
                   OutlineInputBorder(borderRadius: BorderRadius.circular(14)))),
-      home: const AuthenticationGate());
+      home: const StartupGate());
 }

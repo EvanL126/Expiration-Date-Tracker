@@ -63,3 +63,9 @@ Firebase Authentication and Firestore must be configured and accessible for acco
 - `lib/data/`: built-in recipes and sample barcode mappings.
 
 Each screen imports its dependencies directly. Run `flutter test` and `flutter analyze` from the Flutter project directory after making changes.
+
+## Tutorial and account deletion
+
+The first time an account without a saved tutorial-completion flag opens the app, FreshTrack shows a five-step tour. Both Skip and Get started save completion on the device for that account, then attempt to sync to Firestore in the background. A pending or failed cloud save does not block dismissal or show the intro again on that device. Until cloud sync succeeds, another device may still show the tour. Existing accounts without this flag also see the tour once. Settings includes an App tutorial option to replay it.
+
+Settings > Delete account requires the current password and explicit confirmation. It reauthenticates before removing photos, inventory, and profile data, cancels reminders on this device, then deletes the Firebase Authentication account. Cleanup errors leave the login available for retry; deletion across Firebase services is not atomic, so some data may already be removed after a failure. Live deletion requires working Firestore and Storage access. Automated widget tests do not delete real accounts.

@@ -6,6 +6,7 @@ import 'package:timezone/timezone.dart' as tz;
 import '../models/food_item.dart';
 
 class NotificationService {
+  static Future<void> cancelAll() => _plugin.cancelAll();
   static final _plugin = FlutterLocalNotificationsPlugin();
   static const _details = NotificationDetails(
       android: AndroidNotificationDetails(
