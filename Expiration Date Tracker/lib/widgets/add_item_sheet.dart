@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -6,9 +7,12 @@ import '../services/notification_service.dart';
 import '../screens/barcode_scanner_page.dart';
 import '../data/barcode_catalog.dart';
 
+typedef BarcodeScanner = Future<String?> Function(BuildContext context);
+
 class AddItemSheet extends StatefulWidget {
-  const AddItemSheet({super.key, this.item});
+  const AddItemSheet({super.key, this.item, this.scanBarcode});
   final FoodItem? item;
+  final BarcodeScanner? scanBarcode;
   @override
   State<AddItemSheet> createState() => _AddItemSheetState();
 }
@@ -19,7 +23,9 @@ class _AddItemSheetState extends State<AddItemSheet> {
   late String _category, _location;
   late int _quantity;
   late Set<int> _reminders;
+  String? _barcode;
   XFile? _photo;
+  bool _saving = false;
   @override
   void initState() {
     super.initState();
@@ -29,7 +35,10 @@ class _AddItemSheetState extends State<AddItemSheet> {
     _category = i?.category ?? 'Other';
     _location = i?.location ?? 'Fridge';
     _quantity = i?.quantity ?? 1;
-    _reminders = {...?i?.reminderDays};
+    _reminders = {
+      ...(i?.reminderDays ?? {1, 3})
+    };
+    _barcode = i?.barcode;
   }
 
   @override
@@ -39,20 +48,39 @@ class _AddItemSheetState extends State<AddItemSheet> {
   }
 
   Future<void> _scan() async {
-    final code = await Navigator.push<String>(
-        context, MaterialPageRoute(builder: (_) => const BarcodeScannerPage()));
+    final code = widget.scanBarcode == null
+        ? await Navigator.push<String>(context,
+            MaterialPageRoute(builder: (_) => const BarcodeScannerPage()))
+        : await widget.scanBarcode!(context);
     if (code != null && mounted) {
+      final matchedName = barcodeNames[code];
       setState(() {
-        _name.text = barcodeNames[code] ?? 'Scanned item ($code)';
-        _category = barcodeCategories[code] ?? 'Other';
+        _barcode = code;
+        if (matchedName != null) {
+          _name.text = matchedName;
+          _category = barcodeCategories[code] ?? 'Other';
+        }
       });
+      if (matchedName == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Barcode saved. Enter the product name before saving the item.')));
+      }
     }
   }
 
   Future<void> _pickPhoto() async {
-    final photo = await ImagePicker().pickImage(
-        source: ImageSource.gallery, imageQuality: 82, maxWidth: 1600);
-    if (photo != null && mounted) setState(() => _photo = photo);
+    try {
+      final photo = await ImagePicker().pickImage(
+          source: ImageSource.gallery, imageQuality: 82, maxWidth: 1600);
+      if (photo != null && mounted) setState(() => _photo = photo);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Could not open the photo. Please choose it again.')));
+      }
+    }
   }
 
   @override
@@ -82,22 +110,62 @@ class _AddItemSheetState extends State<AddItemSheet> {
                         .headlineSmall
                         ?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
-                OutlinedButton.icon(
-                    onPressed: _scan,
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('Scan barcode')),
-                const SizedBox(height: 12),
+                Card.outlined(
+                    child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text('Barcode',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              const Text(
+                                  'Scan a product to match its barcode with this inventory item.'),
+                              const SizedBox(height: 12),
+                              OutlinedButton.icon(
+                                  onPressed: _scan,
+                                  icon: const Icon(Icons.qr_code_scanner),
+                                  label: Text(_barcode == null
+                                      ? 'Scan barcode'
+                                      : 'Scan again')),
+                              if (_barcode != null) ...[
+                                const SizedBox(height: 10),
+                                Container(
+                                    decoration: BoxDecoration(
+                                        color: const Color(0xFFE8F5F1),
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
+                                    child: ListTile(
+                                        leading: const Icon(Icons.qr_code_2),
+                                        title: Text(barcodeNames[_barcode] ??
+                                            'Unknown product'),
+                                        subtitle: Text('Barcode: $_barcode')))
+                              ]
+                            ]))),
+                const SizedBox(height: 20),
+                Text('Item details',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
                 OutlinedButton.icon(
                     onPressed: _pickPhoto,
                     icon: const Icon(Icons.add_photo_alternate_outlined),
                     label: Text(_photo == null
                         ? 'Add item photo'
                         : 'Change item photo')),
-                if (_photo != null) ...[
+                if (_photo != null || widget.item?.photoImage != null) ...[
                   const SizedBox(height: 10),
                   ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.file(File(_photo!.path),
+                      child: Image(
+                          image: _photo != null
+                              ? FileImage(File(_photo!.path))
+                              : widget.item!.photoImage!,
                           height: 120,
                           width: double.infinity,
                           fit: BoxFit.cover))
@@ -194,26 +262,42 @@ class _AddItemSheetState extends State<AddItemSheet> {
                                 s ? _reminders.add(d) : _reminders.remove(d))))
                         .toList()),
                 TextButton.icon(
-                    onPressed: NotificationService.requestPermission,
+                    onPressed: () => NotificationService.enableAndTest(context),
                     icon: const Icon(Icons.notifications_active_outlined),
-                    label: const Text('Allow expiry notifications')),
+                    label: const Text('Enable and test notifications')),
                 FilledButton(
-                    onPressed: () {
-                      if (_name.text.trim().isNotEmpty) {
-                        Navigator.pop(
-                            context,
-                            FoodItem(
-                                id: widget.item?.id,
-                                name: _name.text.trim(),
-                                category: _category,
-                                expiry: _date,
-                                location: _location,
-                                quantity: _quantity,
-                                reminderDays: _reminders,
-                                photoUrl: widget.item?.photoUrl,
-                                localImagePath: _photo?.path));
-                      }
-                    },
+                    onPressed: _saving
+                        ? null
+                        : () async {
+                            if (_name.text.trim().isEmpty) return;
+                            setState(() => _saving = true);
+                            try {
+                              final photo = _photo == null
+                                  ? widget.item?.localPhoto
+                                  : base64Encode(await _photo!.readAsBytes());
+                              if (!context.mounted) return;
+                              Navigator.pop(
+                                  context,
+                                  FoodItem(
+                                      id: widget.item?.id,
+                                      name: _name.text.trim(),
+                                      category: _category,
+                                      expiry: _date,
+                                      location: _location,
+                                      quantity: _quantity,
+                                      reminderDays: _reminders,
+                                      photoUrl: widget.item?.photoUrl,
+                                      localPhoto: photo,
+                                      barcode: _barcode));
+                            } catch (_) {
+                              if (!context.mounted) return;
+                              setState(() => _saving = false);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          'Could not read the photo. Choose it again and retry.')));
+                            }
+                          },
                     child: Text(
                         widget.item == null ? 'Save item' : 'Save changes'))
               ])));

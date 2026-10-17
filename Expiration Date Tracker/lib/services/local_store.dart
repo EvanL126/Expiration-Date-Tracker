@@ -29,35 +29,54 @@ class LocalStore {
   static Future<void> _saveItemsLocally(List<FoodItem> items) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setStringList(
-        _itemsKey, items.map((item) => jsonEncode(item.toJson())).toList());
+        _itemsKey,
+        items
+            .map((item) => jsonEncode(item.toJson(includeLocalPhoto: true)))
+            .toList());
   }
 
   static Future<List<FoodItem>> _loadItemsLocally() async {
     final preferences = await SharedPreferences.getInstance();
     return (preferences.getStringList(_itemsKey) ?? [])
-        .map((item) => FoodItem.fromJson(jsonDecode(item) as Map<String, dynamic>))
+        .map((item) =>
+            FoodItem.fromJson(jsonDecode(item) as Map<String, dynamic>))
         .toList()
       ..sort((a, b) => a.expiry.compareTo(b.expiry));
   }
 
   static Future<void> _saveProfileLocally(UserProfile profile) async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_profileKey, jsonEncode({...profile.toJson(), 'tutorialCompleted': profile.tutorialCompleted}));
+    await preferences.setString(
+        _profileKey,
+        jsonEncode({
+          ...profile.toJson(),
+          'tutorialCompleted': profile.tutorialCompleted
+        }));
   }
 
   static Future<UserProfile?> _loadProfileLocally() async {
     final preferences = await SharedPreferences.getInstance();
     final saved = preferences.getString(_profileKey);
-    return saved == null ? null : UserProfile.fromJson(jsonDecode(saved) as Map<String, dynamic>);
+    return saved == null
+        ? null
+        : UserProfile.fromJson(jsonDecode(saved) as Map<String, dynamic>);
   }
 
   static Future<List<FoodItem>> loadItems() async {
     if (!_cloudAvailable) return _loadItemsLocally();
     try {
       final snapshot = await _inventory.orderBy('expiry').get();
-      final items = snapshot.docs.map((document) => FoodItem.fromJson(document.data())).toList();
-      await _saveItemsLocally(items);
-      return items;
+      final items = snapshot.docs
+          .map((document) => FoodItem.fromJson(document.data()))
+          .toList();
+      final cached = {
+        for (final item in await _loadItemsLocally()) item.id: item
+      };
+      final merged = items
+          .map((item) => item.copyWith(localPhoto: cached[item.id]?.localPhoto))
+          .toList();
+      await _saveItemsLocally(merged);
+      return merged;
     } catch (error) {
       if (_isMissingDatabase(error)) _cloudAvailable = false;
       return _loadItemsLocally();
@@ -68,17 +87,17 @@ class LocalStore {
     await _saveItemsLocally(items);
     if (!_cloudAvailable) return;
     try {
-    final existing = await _inventory.get();
-    final ids = items.map((item) => item.id).toSet();
-    final batch = _firestore.batch();
-    for (final item in items) {
-      batch.set(_inventory.doc(item.id), item.toJson());
-    }
-    for (final document
-        in existing.docs.where((doc) => !ids.contains(doc.id))) {
-      batch.delete(document.reference);
-    }
-    await batch.commit();
+      final existing = await _inventory.get();
+      final ids = items.map((item) => item.id).toSet();
+      final batch = _firestore.batch();
+      for (final item in items) {
+        batch.set(_inventory.doc(item.id), item.toJson());
+      }
+      for (final document
+          in existing.docs.where((doc) => !ids.contains(doc.id))) {
+        batch.delete(document.reference);
+      }
+      await batch.commit();
     } catch (error) {
       if (_isMissingDatabase(error)) _cloudAvailable = false;
     }
@@ -89,7 +108,8 @@ class LocalStore {
     if (!_cloudAvailable) return _loadProfileLocally();
     try {
       final snapshot = await _profile.get();
-      final profile = snapshot.exists ? UserProfile.fromJson(snapshot.data()!) : null;
+      final profile =
+          snapshot.exists ? UserProfile.fromJson(snapshot.data()!) : null;
       if (profile != null) await _saveProfileLocally(profile);
       return profile;
     } catch (error) {
@@ -130,9 +150,9 @@ class LocalStore {
     if (!_cloudAvailable) return;
     try {
       await _profile.set({
-      ...profile.toJson(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+        ...profile.toJson(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     } on FirebaseException catch (error) {
       if (_isMissingDatabase(error)) _cloudAvailable = false;
     }

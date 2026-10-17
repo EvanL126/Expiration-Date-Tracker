@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/food_item.dart';
 import '../models/user_profile.dart';
@@ -73,12 +73,47 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _save() => LocalStore.saveItems(_items);
-  Future<FoodItem> _uploadPendingPhoto(FoodItem item) async {
-    final path = item.localImagePath;
-    if (path == null) return item;
-    final url = await StorageService.uploadItemPhoto(
-        itemId: item.id, image: File(path));
-    return item.copyWith(photoUrl: url, localImagePath: '');
+
+  Future<void> _scheduleAfterSave(FoodItem item) async {
+    try {
+      if (item.reminderDays.isNotEmpty &&
+          !await NotificationService.requestPermission()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'Item saved. Enable notifications in Android settings to receive reminders.')));
+        }
+        return;
+      }
+      await NotificationService.schedule(item);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Item saved, but its reminders could not be scheduled.')));
+      }
+    }
+  }
+
+  Future<void> _syncPhoto(FoodItem item) async {
+    try {
+      final url = await StorageService.uploadItemPhoto(
+          itemId: item.id, bytes: base64Decode(item.localPhoto!));
+      final index = _items.indexWhere((current) => current.id == item.id);
+      if (!mounted ||
+          index < 0 ||
+          _items[index].localPhoto != item.localPhoto) {
+        return;
+      }
+      setState(() => _items[index] = _items[index].copyWith(photoUrl: url));
+      await _save();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Photo saved on this device. Cloud photo backup is unavailable.')));
+      }
+    }
   }
 
   Future<void> _add() async {
@@ -88,10 +123,11 @@ class _AppShellState extends State<AppShell> {
         useSafeArea: true,
         builder: (_) => const AddItemSheet());
     if (item != null) {
-      final saved = await _uploadPendingPhoto(item);
+      final saved = item;
       setState(() => _items.add(saved));
       await _save();
-      await NotificationService.schedule(saved);
+      await _scheduleAfterSave(saved);
+      if (saved.localPhoto != null) _syncPhoto(saved);
     }
   }
 
@@ -102,10 +138,11 @@ class _AppShellState extends State<AppShell> {
         useSafeArea: true,
         builder: (_) => AddItemSheet(item: item));
     if (updated != null) {
-      final saved = await _uploadPendingPhoto(updated);
+      final saved = updated;
       setState(() => _items[_items.indexWhere((e) => e.id == item.id)] = saved);
       await _save();
-      await NotificationService.schedule(saved);
+      await _scheduleAfterSave(saved);
+      if (saved.localPhoto != null) _syncPhoto(saved);
     }
   }
 
@@ -126,9 +163,18 @@ class _AppShellState extends State<AppShell> {
 
   void _detail(FoodItem item) => Navigator.push(
       context,
-      MaterialPageRoute(
-          builder: (_) =>
-              ItemDetailPage(item: item, onEdit: () => _edit(item))));
+      MaterialPageRoute<void>(
+          builder: (_) => StatefulBuilder(
+              builder: (context, refresh) => ItemDetailPage(
+                  item: _items.firstWhere((current) => current.id == item.id,
+                      orElse: () => item),
+                  onEdit: () async {
+                    final current = _items.firstWhere(
+                        (current) => current.id == item.id,
+                        orElse: () => item);
+                    await _edit(current);
+                    if (context.mounted) refresh(() {});
+                  }))));
   @override
   Widget build(BuildContext context) {
     if (!_loading && _loadError == null && _showTutorial) {
@@ -189,10 +235,6 @@ class _AppShellState extends State<AppShell> {
                               onPressed: _load, child: const Text('Retry')),
                         ])))
                 : IndexedStack(index: _index, children: pages),
-        floatingActionButton: _index == 3 && !_loading && _loadError == null
-            ? FloatingActionButton(
-                onPressed: _add, child: const Icon(Icons.add))
-            : null,
         bottomNavigationBar: NavigationBar(
             selectedIndex: _index,
             onDestinationSelected: (i) => setState(() => _index = i),

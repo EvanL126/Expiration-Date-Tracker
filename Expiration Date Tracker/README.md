@@ -9,7 +9,7 @@ FreshTrack is a Flutter app for tracking food expiration dates, planning how to 
 - Add optional item photos, stored privately in Firebase Storage.
 - Add, edit, search, filter, and adjust quantities of inventory items.
 - Scan a barcode with the device camera to start adding an item.
-- Receive configurable expiry reminders.
+- Receive configurab  le expiry reminders.
 - Open expiring items from the Home screen, Alerts, or Calendar for details.
 - Get quantity guidance and recipe suggestions for food that needs using soon.
 

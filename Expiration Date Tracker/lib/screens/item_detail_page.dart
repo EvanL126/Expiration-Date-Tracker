@@ -1,3 +1,6 @@
+import 'recipes_page.dart';
+import '../data/recipes.dart';
+import 'recipe_detail_page.dart';
 import 'package:flutter/material.dart';
 import '../models/food_item.dart';
 
@@ -11,6 +14,13 @@ class ItemDetailPage extends StatelessWidget {
         IconButton(onPressed: onEdit, icon: const Icon(Icons.edit_outlined))
       ]),
       body: ListView(padding: const EdgeInsets.all(20), children: [
+        if (item.photoImage != null) ...[
+          ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image(
+                  image: item.photoImage!, height: 180, fit: BoxFit.cover)),
+          const SizedBox(height: 16),
+        ],
         Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -41,38 +51,32 @@ class ItemDetailPage extends StatelessWidget {
                 .titleLarge
                 ?.copyWith(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
-        const Text(
-            'Meal ideas based on this item. Find cooking steps in Recipes.'),
+        const Text('Tap a recipe to see ingredients and cooking steps.'),
         const SizedBox(height: 10),
-        ..._recipesFor(item).map((r) => Card(
-            child: ListTile(
-                leading: const CircleAvatar(child: Icon(Icons.auto_awesome)),
-                title: Text(r.$1),
-                subtitle: Text(r.$2),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text('${r.$1} added to your meal ideas'))))))
+        ...recipes
+            .where((recipe) => recipe.keywords
+                .any((word) => item.name.toLowerCase().contains(word)))
+            .map((recipe) => Card(
+                child: ListTile(
+                    leading:
+                        const CircleAvatar(child: Icon(Icons.restaurant_menu)),
+                    title: Text(recipe.title),
+                    subtitle: Text('${recipe.minutes} minutes'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                            builder: (_) => RecipeDetailPage(
+                                recipe: recipe,
+                                inventoryItems:
+                                    item.quantity > 0 && item.daysLeft >= 0
+                                        ? [item]
+                                        : [])))))),
+        TextButton(
+            onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                    builder: (_) => RecipesPage(items: [item]))),
+            child: const Text('Browse all recipes')),
       ]));
 }
-
-List<(String, String)> _recipesFor(FoodItem item) => switch (item.category) {
-      'Produce' => [
-          (
-            'Quick sauté',
-            'Pair ${item.name} with garlic, olive oil, and grains.'
-          ),
-          ('Fresh salad', 'Toss ${item.name} into a bright, low-waste lunch.')
-        ],
-      'Dairy' => [
-          ('Creamy pasta', 'Use ${item.name} in a quick sauce or topping.'),
-          ('Breakfast bowl', 'Make a simple breakfast using ${item.name}.')
-        ],
-      _ => [
-          (
-            'Use-it-up bowl',
-            'Build a flexible meal around ${item.name} and pantry staples.'
-          ),
-          ('Weekend prep', 'Turn ${item.name} into portions for the week.')
-        ]
-    };

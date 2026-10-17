@@ -61,9 +61,9 @@ class _ProfilePageState extends State<ProfilePage> {
             leading: const Icon(Icons.notifications_active_outlined),
             title: const Text('Expiry notifications'),
             subtitle:
-                const Text('Enable reminders for items before they expire'),
+                const Text('Enable reminders and send a test notification'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: NotificationService.requestPermission),
+            onTap: () => NotificationService.enableAndTest(context)),
         const Divider(),
         ListTile(
             leading: const Icon(Icons.help_outline),

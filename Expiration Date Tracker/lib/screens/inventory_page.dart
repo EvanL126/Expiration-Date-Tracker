@@ -20,6 +20,44 @@ class InventoryPage extends StatefulWidget {
 
 class _InventoryPageState extends State<InventoryPage> {
   String _query = '', _category = 'All', _location = 'All locations';
+
+  Future<void> _decreaseQuantity(FoodItem item) async {
+    if (item.quantity > 1) {
+      widget.onQuantity(item, -1);
+      return;
+    }
+    if (item.quantity <= 0) return;
+
+    final remove = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+                title: Text('Remove ${item.name}?'),
+                content: Text(
+                    '${item.name} has reached a quantity of 0. Would you like to remove it from your inventory?'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('Keep item')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('Remove item'))
+                ]));
+    if (!mounted || remove == null) return;
+    if (remove) {
+      widget.onDelete(item);
+    } else {
+      widget.onQuantity(item, -1);
+    }
+  }
+
+  Widget _itemCard(FoodItem item) => FoodCard(
+      item: item,
+      showControls: true,
+      onTap: () => widget.onEdit(item),
+      onDelete: () => widget.onDelete(item),
+      onDecrease: () => _decreaseQuantity(item),
+      onIncrease: () => widget.onQuantity(item, 1));
+
   @override
   Widget build(BuildContext context) {
     final categories = [
@@ -39,6 +77,8 @@ class _InventoryPageState extends State<InventoryPage> {
             i.name.toLowerCase().contains(_query.toLowerCase()))
         .toList()
       ..sort((a, b) => a.expiry.compareTo(b.expiry));
+    final scanned = visible.where((item) => item.barcode != null).toList();
+    final other = visible.where((item) => item.barcode == null).toList();
     return SafeArea(
         child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
@@ -93,13 +133,25 @@ class _InventoryPageState extends State<InventoryPage> {
                 child: Center(
                     child:
                         Text('No matching items. Add something to track it.'))),
-          ...visible.map((i) => FoodCard(
-              item: i,
-              showControls: true,
-              onTap: () => widget.onEdit(i),
-              onDelete: () => widget.onDelete(i),
-              onDecrease: () => widget.onQuantity(i, -1),
-              onIncrease: () => widget.onQuantity(i, 1)))
+          if (scanned.isNotEmpty) ...[
+            Text('Scanned barcodes',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            ...scanned.map(_itemCard),
+          ],
+          if (other.isNotEmpty) ...[
+            if (scanned.isNotEmpty) const SizedBox(height: 18),
+            Text('Other inventory',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            ...other.map(_itemCard),
+          ]
         ]));
   }
 }

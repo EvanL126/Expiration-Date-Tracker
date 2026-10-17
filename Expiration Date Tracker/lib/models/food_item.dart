@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 
 class FoodItem {
@@ -10,6 +11,8 @@ class FoodItem {
     Set<int>? reminderDays,
     this.photoUrl,
     this.localImagePath,
+    this.localPhoto,
+    this.barcode,
     String? id,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch.toString(),
         reminderDays = reminderDays ?? {1, 3};
@@ -24,6 +27,8 @@ class FoodItem {
         reminderDays:
             ((json['reminderDays'] as List?)?.cast<int>().toSet()) ?? {1, 3},
         photoUrl: json['photoUrl'] as String?,
+        localPhoto: json['localPhoto'] as String?,
+        barcode: json['barcode'] as String?,
       );
 
   final String id;
@@ -34,9 +39,17 @@ class FoodItem {
   final int quantity;
   final Set<int> reminderDays;
   final String? photoUrl;
+  final String? barcode;
 
   /// Used only while an image is waiting to upload to Firebase Storage.
   final String? localImagePath;
+  final String? localPhoto;
+
+  ImageProvider? get photoImage => localPhoto != null
+      ? MemoryImage(base64Decode(localPhoto!))
+      : photoUrl != null
+          ? NetworkImage(photoUrl!)
+          : null;
 
   int get daysLeft => DateTime.utc(expiry.year, expiry.month, expiry.day)
       .difference(DateTime.utc(
@@ -68,7 +81,9 @@ class FoodItem {
           String? location,
           Set<int>? reminderDays,
           String? photoUrl,
-          String? localImagePath}) =>
+          String? localImagePath,
+          String? localPhoto,
+          String? barcode}) =>
       FoodItem(
         id: id,
         name: name ?? this.name,
@@ -79,9 +94,12 @@ class FoodItem {
         reminderDays: reminderDays ?? this.reminderDays,
         photoUrl: photoUrl ?? this.photoUrl,
         localImagePath: localImagePath ?? this.localImagePath,
+        localPhoto: localPhoto ?? this.localPhoto,
+        barcode: barcode ?? this.barcode,
       );
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toJson({bool includeLocalPhoto = false}) => {
+        if (includeLocalPhoto && localPhoto != null) 'localPhoto': localPhoto,
         'id': id,
         'name': name,
         'category': category,
@@ -90,6 +108,7 @@ class FoodItem {
         'quantity': quantity,
         'reminderDays': reminderDays.toList(),
         'photoUrl': photoUrl,
+        'barcode': barcode,
       };
 }
 

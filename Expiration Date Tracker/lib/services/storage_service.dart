@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -8,12 +8,12 @@ class StorageService {
 
   static Future<String> uploadItemPhoto({
     required String itemId,
-    required File image,
+    required Uint8List bytes,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw StateError('Sign in before uploading a photo.');
     final reference = _storage.ref('users/${user.uid}/items/$itemId.jpg');
-    await reference.putFile(image, SettableMetadata(contentType: 'image/jpeg'));
+    await reference.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
     return reference.getDownloadURL();
   }
 

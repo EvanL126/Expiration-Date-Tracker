@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'screens/authentication_gate.dart';
 import 'startup_gate.dart';
 
 class ExpirationDateTrackerApp extends StatelessWidget {

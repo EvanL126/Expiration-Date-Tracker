@@ -16,15 +16,20 @@ class RecipesPage extends StatelessWidget {
       .toList()
     ..sort((a, b) => a.expiry.compareTo(b.expiry));
 
+  int _compareMatches((Recipe, List<FoodItem>) a, (Recipe, List<FoodItem>) b) {
+    final countComparison = b.$2.length.compareTo(a.$2.length);
+    if (countComparison != 0) return countComparison;
+    if (a.$2.isNotEmpty && b.$2.isNotEmpty) {
+      final expiryComparison = a.$2.first.expiry.compareTo(b.$2.first.expiry);
+      if (expiryComparison != 0) return expiryComparison;
+    }
+    return a.$1.title.compareTo(b.$1.title);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final ranked = [...recipes]..sort((a, b) {
-        final aItems = _matches(a), bItems = _matches(b);
-        if (aItems.isEmpty && bItems.isEmpty) return a.title.compareTo(b.title);
-        if (aItems.isEmpty) return 1;
-        if (bItems.isEmpty) return -1;
-        return aItems.first.expiry.compareTo(bItems.first.expiry);
-      });
+    final ranked = recipes.map((recipe) => (recipe, _matches(recipe))).toList()
+      ..sort(_compareMatches);
     return SafeArea(
         child: ListView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
@@ -32,26 +37,29 @@ class RecipesPage extends StatelessWidget {
         Text('Recipes', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 8),
         const Text(
-            'Simple meals, with matches to your soonest-expiring ingredients shown first.'),
+            'Recipes using the most items from your inventory are shown first. Items expiring sooner break ties.'),
         if (items.isEmpty)
           const Padding(
               padding: EdgeInsets.symmetric(vertical: 12),
               child: Text(
                   'Add inventory items to see ingredient matches. You can still browse every recipe.')),
         const SizedBox(height: 16),
-        ...ranked.map((recipe) {
-          final matches = _matches(recipe);
+        ...ranked.map((suggestion) {
+          final recipe = suggestion.$1;
+          final matches = suggestion.$2;
+          final matchLabel = matches.length == 1 ? 'match' : 'matches';
           return Card(
               child: ListTile(
             leading: const Icon(Icons.restaurant_menu),
             title: Text(recipe.title),
             subtitle: Text(
-                '${recipe.minutes} min • 2 servings\n${matches.isEmpty ? 'Browse recipe' : 'In your inventory: ${matches.map((i) => i.name).join(', ')}'}'),
+                '${recipe.minutes} min • 2 servings\n${matches.isEmpty ? 'No matching inventory items' : '${matches.length} inventory $matchLabel: ${matches.map((i) => i.name).join(', ')}'}'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute<void>(
-                    builder: (_) => RecipeDetailPage(recipe: recipe))),
+                    builder: (_) => RecipeDetailPage(
+                        recipe: recipe, inventoryItems: matches))),
           ));
         }),
       ],

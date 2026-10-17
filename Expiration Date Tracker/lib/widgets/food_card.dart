@@ -29,10 +29,8 @@ class FoodCard extends StatelessWidget {
                         children: [
                           CircleAvatar(
                               backgroundColor: const Color(0xFFDDF4EF),
-                              backgroundImage: item.photoUrl == null
-                                  ? null
-                                  : NetworkImage(item.photoUrl!),
-                              child: item.photoUrl == null
+                              backgroundImage: item.photoImage,
+                              child: item.photoImage == null
                                   ? Icon(item.icon,
                                       color: const Color(0xFF08756E))
                                   : null),
@@ -45,6 +43,11 @@ class FoodCard extends StatelessWidget {
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w700)),
                                 Text('${item.category} • ${item.location}'),
+                                if (item.barcode != null)
+                                  Text('Barcode: ${item.barcode}',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall),
                                 Text(item.expiryLabel,
                                     style: TextStyle(
                                         color: item.daysLeft <= 3
