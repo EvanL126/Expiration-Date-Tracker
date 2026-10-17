@@ -25,8 +25,7 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _busy = false);
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Enter the email and password used to create your account.')));
+          content: Text('Either the email or password is wrong.')));
     }
   }
 
