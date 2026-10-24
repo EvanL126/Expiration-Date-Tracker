@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-
-    <style name="Theme.UBeer" parent="android:Theme.Material.Light.NoActionBar" />
-    <style name="Theme.UBeer.Scanner" parent="zxing_CaptureTheme">
-        <item name="android:windowFullscreen">true</item>
-        <item name="android:windowIsFloating">false</item>
-    </style>
-</resources>
