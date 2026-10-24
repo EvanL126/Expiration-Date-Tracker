@@ -243,6 +243,20 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets('equal matches favor more items expiring within three days',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: RecipesPage(items: [
+      food('Yogurt', 'Dairy', 1),
+      food('Apple', 'Produce', 2),
+      food('Egg', 'Dairy', 0),
+      food('Oats', 'Pantry', 30),
+    ]))));
+    expect(tester.getTopLeft(find.text('Yogurt breakfast bowl')).dy,
+        lessThan(tester.getTopLeft(find.text('Banana oat pancakes')).dy));
+  });
+
   test('inventory serialization preserves edited values', () {
     final original = food('Spinach', 'Produce', 2)
         .copyWith(quantity: 4, barcode: '123456789012');

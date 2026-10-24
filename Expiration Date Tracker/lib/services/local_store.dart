@@ -199,7 +199,19 @@ class LocalStore {
         }
       },
       cancelReminders: NotificationService.cancelAll,
-      deleteProfile: profile.delete,
+      deleteProfile: () async {
+        await profile.delete();
+        final preferences = await SharedPreferences.getInstance();
+        for (final key in [
+          'inventory_${user.uid}',
+          'profile_${user.uid}',
+          'tutorial_completed_${user.uid}',
+        ]) {
+          if (!await preferences.remove(key)) {
+            throw StateError('Could not remove cached account data.');
+          }
+        }
+      },
       deleteLogin: user.delete,
     );
   }
